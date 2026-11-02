@@ -47,9 +47,11 @@ def test_paypal_failure_is_readable(settings):
             raise PayPalError("PayPal rejected the call: sandbox said no.")
 
     app = create_app(settings=settings, engine=make_engine(settings.database_url), gateway=FailingGateway())
-    response = TestClient(app).post("/invoices", data=FORM)
+    test_client = TestClient(app)
+    response = test_client.post("/invoices", data=FORM)
     assert response.status_code == 502
     assert "sandbox said no" in response.text
+    assert test_client.get("/api/invoices").json() == []
 
 
 def test_new_client_gets_limited_risk(client):
@@ -80,3 +82,25 @@ def test_dashboard_includes_grid_and_ai_panels(client):
     assert 'id="invoice-data"' in page.text
     assert "ag-theme-quartz" in page.text
     assert 'id="ai-fill"' in page.text
+
+
+def test_send_failure_keeps_draft_with_paypal_id(settings):
+    from fastapi.testclient import TestClient
+    from app.models import make_engine
+    from app.web import create_app
+
+    class FailingSend:
+        def create_invoice(self, **kwargs):
+            return "MOCK-SEND-FAIL"
+
+        def send_invoice(self, paypal_invoice_id):
+            raise PayPalError("PayPal send said no.")
+
+    app = create_app(settings=settings, engine=make_engine(settings.database_url), gateway=FailingSend())
+    test_client = TestClient(app)
+    response = test_client.post("/invoices", data=FORM)
+    assert response.status_code == 502
+    rows = test_client.get("/api/invoices").json()
+    assert len(rows) == 1
+    assert rows[0]["status"] == "DRAFT"
+    assert rows[0]["paypal_invoice_id"] == "MOCK-SEND-FAIL"

@@ -11,6 +11,7 @@ from sqlmodel import Session, select
 
 from app.config import Settings
 from app.models import Client, Event, Invoice, utcnow
+from app.paypal import PayPalError
 from app.risk import HistoryInvoice, score_invoice
 from app.validation import InvoiceProposal, proposal_to_cents
 
@@ -81,22 +82,35 @@ def create_invoice(session: Session, proposal: InvoiceProposal, settings: Settin
     session.commit()
     session.refresh(invoice)
 
-    paypal_id = gateway.create_invoice(
-        invoice_number=invoice.invoice_number,
-        amount_cents=invoice.amount_cents,
-        currency=invoice.currency,
-        description=invoice.description,
-        terms_days=invoice.terms_days,
-        client_name=client.name,
-        client_email=client.email,
-        issued_at=invoice.issued_at,
-        due_at=invoice.due_at,
-    )
+    try:
+        paypal_id = gateway.create_invoice(
+            invoice_number=invoice.invoice_number,
+            amount_cents=invoice.amount_cents,
+            currency=invoice.currency,
+            description=invoice.description,
+            terms_days=invoice.terms_days,
+            client_name=client.name,
+            client_email=client.email,
+            issued_at=invoice.issued_at,
+            due_at=invoice.due_at,
+        )
+    except PayPalError:
+        session.delete(invoice)
+        session.commit()
+        raise
+
     invoice.paypal_invoice_id = paypal_id
     session.add(invoice)
     session.commit()
 
-    gateway.send_invoice(paypal_id)
+    try:
+        gateway.send_invoice(paypal_id)
+    except PayPalError:
+        invoice.status = "DRAFT"
+        session.add(invoice)
+        session.commit()
+        raise
+
     invoice.status = "SENT"
     session.add(invoice)
     session.commit()
