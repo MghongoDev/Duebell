@@ -36,6 +36,7 @@ class Invoice(SQLModel, table=True):
     risk_score: Optional[float] = None
     risk_level: Optional[str] = None
     risk_reasons: str = ""
+    limited_data: bool = False
     created_at: datetime = Field(default_factory=utcnow)
 
 

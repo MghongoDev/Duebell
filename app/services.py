@@ -77,6 +77,7 @@ def create_invoice(session: Session, proposal: InvoiceProposal, settings: Settin
         risk_score=assessment.score,
         risk_level=assessment.level,
         risk_reasons="\n".join(assessment.reasons),
+        limited_data=assessment.limited_data,
     )
     session.add(invoice)
     session.commit()
@@ -157,10 +158,7 @@ def invoice_rows(session: Session) -> list[dict]:
                 "risk_score": invoice.risk_score,
                 "risk_level": invoice.risk_level,
                 "risk_reasons": [line for line in invoice.risk_reasons.splitlines() if line.strip()],
-                "limited_data": any(
-                    "New client" in r or "Limited history" in r
-                    for r in (invoice.risk_reasons or "").splitlines()
-                ),
+                "limited_data": bool(invoice.limited_data),
                 "paypal_invoice_id": invoice.paypal_invoice_id,
             }
         )
