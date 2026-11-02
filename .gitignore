@@ -1,0 +1,24 @@
+# Secrets and local demo material
+Paypal_sandbox.txt
+.env
+.env.*
+!.env.example
+duebell.db
+*.db
+*.sqlite3
+
+# Local notes and planning
+.scratch/
+duebell-implementation-guide.md
+invoice-to-cash-agent-implementation-guide.md
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Editors and OS
+.DS_Store
+node_modules/
