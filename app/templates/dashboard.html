@@ -78,6 +78,37 @@
 
 <section class="panel">
   <div class="panel-head">
+    <h2>Reminders</h2>
+    <p>Drafts wait for your approval. Nothing sends by itself.</p>
+  </div>
+  <div class="panel-tools">
+    <button class="ghost small" id="scan-reminders">Scan now</button>
+  </div>
+  {% if reminders %}
+  <ul class="reminder-list">
+    {% for reminder in reminders %}
+    <li class="reminder">
+      <div class="reminder-head">
+        <strong>{{ reminder.invoice_number }} · {{ reminder.client_name }}</strong>
+        <span class="status status-{{ reminder.status|lower }}">{{ reminder.status }}</span>
+      </div>
+      <pre class="draft">{{ reminder.draft_text }}</pre>
+      {% if reminder.status == 'PENDING' %}
+      <div class="row-actions">
+        <button class="small" data-reminder-action="approve" data-id="{{ reminder.id }}">Approve and send</button>
+        <button class="ghost small" data-reminder-action="dismiss" data-id="{{ reminder.id }}">Dismiss</button>
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="empty"><p>No reminders yet. Scan for overdue invoices.</p></div>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
     <h2>Invoices</h2>
     <p>Status, risk, and the reason behind each score.</p>
   </div>
@@ -172,6 +203,36 @@ document.addEventListener("click", async (event) => {
     if (!response.ok) {
       window.alert(data.error || "That did not work.");
     }
+  } catch (error) {
+    window.alert("Could not reach the server.");
+  }
+  window.location.reload();
+});
+
+document.getElementById("scan-reminders").addEventListener("click", async () => {
+  const button = document.getElementById("scan-reminders");
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/reminders/scan", { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) window.alert(data.error || "Could not scan for reminders.");
+  } catch (error) {
+    window.alert("Could not reach the server.");
+  }
+  window.location.reload();
+});
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-reminder-action]");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const response = await fetch(
+      `/api/reminders/${button.dataset.id}/${button.dataset.reminderAction}`,
+      { method: "POST" }
+    );
+    const data = await response.json();
+    if (!response.ok) window.alert(data.error || "That did not work.");
   } catch (error) {
     window.alert("Could not reach the server.");
   }

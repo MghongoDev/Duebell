@@ -323,6 +323,59 @@ button.small {
   flex-wrap: wrap;
 }
 
+.panel-tools {
+  margin: -0.5rem 0 1rem;
+}
+
+.reminder-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.reminder {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+  background: #fff;
+}
+
+.reminder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.reminder .draft {
+  margin: 0.6rem 0;
+  white-space: pre-wrap;
+  font: inherit;
+  font-size: 0.86rem;
+  color: var(--ink-soft);
+  background: #faf6ee;
+  border-radius: 9px;
+  padding: 0.7rem 0.8rem;
+}
+
+.status-pending {
+  background: #fdf1d6;
+  color: #8a5a12;
+}
+
+.status-sent {
+  background: #e5f2e8;
+  color: #2f6b43;
+}
+
+.status-dismissed {
+  background: #f0ece4;
+  color: #6b655c;
+}
+
 .activity {
   list-style: none;
   margin: 0;

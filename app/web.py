@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, Request
@@ -12,9 +13,16 @@ from pydantic import ValidationError as PydanticValidationError
 from sqlmodel import Session
 
 from app.config import Settings, get_settings
+from app.jobs import start_scheduler, stop_scheduler
 from app.llm import LLMError, build_parser
-from app.models import init_db, make_engine
+from app.models import Reminder, init_db, make_engine
 from app.paypal import PayPalError, build_gateway
+from app.reminders import (
+    dismiss_reminder,
+    draft_reminders,
+    reminder_rows,
+    send_reminder,
+)
 from app.services import (
     create_invoice,
     dashboard_totals,
@@ -58,6 +66,7 @@ def _render_dashboard(
             "rows": rows,
             "totals": dashboard_totals(rows),
             "events": _activity_rows(session),
+            "reminders": reminder_rows(session),
             "errors": errors or [],
             "form": form or {},
         },
@@ -70,17 +79,28 @@ def create_app(
     engine=None,
     gateway=None,
     llm=None,
+    scheduler_enabled: bool = False,
 ) -> FastAPI:
     settings = settings or get_settings()
     engine = engine or make_engine(settings.database_url)
     init_db(engine)
     gateway = gateway or build_gateway(settings)
 
-    app = FastAPI(title="Duebell", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if app.state.scheduler_enabled:
+            start_scheduler(app)
+        yield
+        if app.state.scheduler_enabled:
+            stop_scheduler(app)
+
+    app = FastAPI(title="Duebell", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.engine = engine
     app.state.gateway = gateway
     app.state.llm = llm or build_parser(settings)
+    app.state.scheduler_enabled = scheduler_enabled
+    app.state.scheduler = None
 
     app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
@@ -170,6 +190,43 @@ def create_app(
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
         return JSONResponse({"ok": True, "proposal": proposal.model_dump(mode="json")})
 
+    @app.post("/api/reminders/scan", response_class=JSONResponse)
+    def api_scan_reminders(request: Request, session: Session = Depends(get_session)):
+        created = draft_reminders(session, request.app.state.settings)
+        return {"ok": True, "created": len(created)}
+
+    @app.get("/api/reminders", response_class=JSONResponse)
+    def api_reminders(session: Session = Depends(get_session)):
+        return reminder_rows(session)
+
+    @app.post("/api/reminders/{reminder_id}/approve", response_class=JSONResponse)
+    def api_approve_reminder(
+        reminder_id: int,
+        request: Request,
+        session: Session = Depends(get_session),
+    ):
+        reminder = session.get(Reminder, reminder_id)
+        if reminder is None:
+            return JSONResponse({"ok": False, "error": "Reminder not found."}, status_code=404)
+        try:
+            send_reminder(session, reminder, request.app.state.gateway)
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+        except PayPalError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+        return {"ok": True, "status": reminder.status}
+
+    @app.post("/api/reminders/{reminder_id}/dismiss", response_class=JSONResponse)
+    def api_dismiss_reminder(reminder_id: int, session: Session = Depends(get_session)):
+        reminder = session.get(Reminder, reminder_id)
+        if reminder is None:
+            return JSONResponse({"ok": False, "error": "Reminder not found."}, status_code=404)
+        try:
+            dismiss_reminder(session, reminder)
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+        return {"ok": True, "status": reminder.status}
+
     @app.get("/api/invoices", response_class=JSONResponse)
     def api_invoices(session: Session = Depends(get_session)):
         return invoice_rows(session)
@@ -219,4 +276,4 @@ def create_app(
     return app
 
 
-app = create_app()
+app = create_app(scheduler_enabled=True)
