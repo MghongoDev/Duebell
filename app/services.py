@@ -11,6 +11,7 @@ from sqlmodel import Session, select
 
 from app.config import Settings
 from app.models import Client, Event, Invoice, utcnow
+from app.risk import HistoryInvoice, score_invoice
 from app.validation import InvoiceProposal, proposal_to_cents
 
 PAID_STATUSES = {"PAID", "MARKED_AS_PAID"}
@@ -44,19 +45,37 @@ def next_invoice_number(session: Session) -> str:
     return f"DUE-{utcnow():%Y%m%d}-{count:04d}"
 
 
+def client_history(session: Session, client_id: int) -> list[HistoryInvoice]:
+    invoices = session.exec(select(Invoice).where(Invoice.client_id == client_id)).all()
+    return [
+        HistoryInvoice(amount_cents=item.amount_cents, due_at=item.due_at, paid_at=item.paid_at)
+        for item in invoices
+        if item.status != "CANCELLED"
+    ]
+
+
 def create_invoice(session: Session, proposal: InvoiceProposal, settings: Settings, gateway) -> Invoice:
     client = get_or_create_client(session, proposal.client_name, proposal.client_email)
     now = utcnow()
+    amount_cents = proposal_to_cents(proposal.amount)
+    assessment = score_invoice(
+        amount_cents,
+        proposal.terms_days,
+        client_history(session, client.id),
+    )
     invoice = Invoice(
         client_id=client.id,
         invoice_number=next_invoice_number(session),
         description=proposal.description.strip(),
-        amount_cents=proposal_to_cents(proposal.amount),
+        amount_cents=amount_cents,
         currency=proposal.currency.strip().upper(),
         terms_days=proposal.terms_days,
         issued_at=now,
         due_at=now + timedelta(days=proposal.terms_days),
         status="DRAFT",
+        risk_score=assessment.score,
+        risk_level=assessment.level,
+        risk_reasons="\n".join(assessment.reasons),
     )
     session.add(invoice)
     session.commit()

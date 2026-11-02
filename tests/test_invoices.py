@@ -52,6 +52,13 @@ def test_paypal_failure_is_readable(settings):
     assert "sandbox said no" in response.text
 
 
+def test_new_client_gets_limited_risk(client):
+    client.post("/invoices", data=FORM, follow_redirects=False)
+    row = client.get("/api/invoices").json()[0]
+    assert row["risk_level"] in {"MEDIUM", "HIGH"}
+    assert any("New client" in reason for reason in row["risk_reasons"])
+
+
 def test_bad_email_returns_field_error(client):
     data = dict(FORM, client_email="not-an-email")
     response = client.post("/invoices", data=data)
