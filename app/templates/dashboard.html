@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="summary" aria-label="Totals">
+  <article class="stat">
+    <span class="stat-label">Outstanding</span>
+    <strong class="stat-value">{{ totals.outstanding_display }}</strong>
+    <span class="stat-note">across {{ totals.invoice_count }} invoices</span>
+  </article>
+  <article class="stat">
+    <span class="stat-label">Overdue</span>
+    <strong class="stat-value">{{ totals.overdue_count }}</strong>
+    <span class="stat-note">past the due date</span>
+  </article>
+  <article class="stat">
+    <span class="stat-label">Collected</span>
+    <strong class="stat-value">{{ totals.paid_display }}</strong>
+    <span class="stat-note">paid to date</span>
+  </article>
+</section>
+
+<section class="panel create-panel">
+  <div class="panel-head">
+    <h2>New invoice</h2>
+    <p>Fill the fields, then confirm before anything reaches PayPal.</p>
+  </div>
+
+  {% if errors %}
+  <div class="alert" role="alert">
+    <strong>Check these fields:</strong>
+    <ul>
+      {% for error in errors %}
+      <li>{{ error.field }}: {{ error.message }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <form method="post" action="/invoices" class="invoice-form">
+    <label>
+      <span>Client name</span>
+      <input name="client_name" value="{{ form.client_name or '' }}" required>
+    </label>
+    <label>
+      <span>Client email</span>
+      <input name="client_email" type="email" value="{{ form.client_email or '' }}" required>
+    </label>
+    <label class="wide">
+      <span>Work description</span>
+      <input name="description" value="{{ form.description or '' }}" placeholder="Logo design, brand guide, two rounds" required>
+    </label>
+    <label>
+      <span>Amount</span>
+      <input name="amount" inputmode="decimal" value="{{ form.amount or '' }}" placeholder="1200.00" required>
+    </label>
+    <label>
+      <span>Currency</span>
+      <input name="currency" value="{{ form.currency or 'USD' }}" required>
+    </label>
+    <label>
+      <span>Terms (days)</span>
+      <input name="terms_days" inputmode="numeric" value="{{ form.terms_days or '14' }}" required>
+    </label>
+    <div class="form-actions">
+      <button type="submit">Create invoice</button>
+    </div>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Invoices</h2>
+    <p>Status, risk, and the reason behind each score.</p>
+  </div>
+
+  {% if rows %}
+  <div class="table-wrap">
+    <table class="invoice-table">
+      <thead>
+        <tr>
+          <th>Invoice</th>
+          <th>Client</th>
+          <th>Amount</th>
+          <th>Due</th>
+          <th>Status</th>
+          <th>Risk</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr class="{% if row.overdue %}is-overdue{% endif %}">
+          <td>
+            <strong>{{ row.invoice_number }}</strong>
+            <span class="muted">{{ row.description }}</span>
+          </td>
+          <td>
+            <span>{{ row.client_name }}</span>
+            <span class="muted">{{ row.client_email }}</span>
+          </td>
+          <td class="amount">{{ row.amount_display }} {{ row.currency }}</td>
+          <td>{{ row.due_display }}</td>
+          <td><span class="status status-{{ row.status|lower }}">{{ row.status }}</span></td>
+          <td>
+            {% if row.risk_level %}
+            <span class="risk risk-{{ row.risk_level|lower }}">{{ row.risk_level }}</span>
+            <ul class="reasons">
+              {% for reason in row.risk_reasons %}
+              <li>{{ reason }}</li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            <span class="muted">Not scored</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    <p>No invoices yet. Create the first one above.</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
