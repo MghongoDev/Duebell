@@ -1,4 +1,4 @@
-"""Invoice services for Duebell (issue #9)."""
+"""Invoice services for Duebell (issues #9, #11). See ADR 0005."""
 
 from __future__ import annotations
 

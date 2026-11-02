@@ -2,6 +2,7 @@
 
 Scanning only creates drafts. A human must approve a draft before Duebell asks
 PayPal to send a reminder. The draft uses only facts already on the invoice.
+See ADR 0003.
 """
 
 from __future__ import annotations

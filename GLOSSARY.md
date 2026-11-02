@@ -16,6 +16,14 @@ _Avoid_: Bill, payment request
 A structured invoice draft parsed from free text but not yet confirmed. It is not an invoice until a human confirms it.
 _Avoid_: Draft invoice, parse result
 
+**AI draft**:
+The model's JSON answer to a description. It is untrusted until it passes the field allowlist and proposal validation.
+_Avoid_: AI invoice, model output
+
+**Guardrail**:
+The fixed checks that reject unknown fields and invalid values before a proposal reaches the form.
+_Avoid_: Safety layer, filter
+
 **Payment terms**:
 The number of days a client has to pay, counted from the issue date.
 _Avoid_: Net terms, credit period
@@ -40,6 +48,10 @@ _Avoid_: Cold-start score, default score
 A message that asks a client to pay an unpaid invoice. Duebell drafts it; a human approves it before PayPal sends it.
 _Avoid_: Nudge, follow-up, chase
 
+**Scan**:
+A pass that finds eligible invoices and creates pending reminder drafts. It never sends.
+_Avoid_: Batch, job, run
+
 **Approval**:
 A human decision that lets a drafted reminder leave the app. It is the only path to a PayPal send.
 _Avoid_: Confirmation, sign-off
@@ -48,13 +60,25 @@ _Avoid_: Confirmation, sign-off
 A message from PayPal about an invoice, such as sent, paid, cancelled, or refunded. Duebell stores each event once by its PayPal event ID.
 _Avoid_: Notification, callback
 
+**Idempotency**:
+The property that replaying the same PayPal event changes nothing and returns a duplicate result.
+_Avoid_: Deduplication, replay guard
+
 **Gateway**:
 The boundary that talks to PayPal. A mock gateway and a sandbox gateway implement the same interface.
 _Avoid_: Client, adapter, connector
 
 **Mock mode**:
-A runtime mode that uses in-memory adapters for PayPal and the AI service, so the app runs with no credentials.
+A runtime mode that uses an in-memory PayPal adapter and disables AI parsing, so the app runs with no credentials. The manual form still works.
 _Avoid_: Demo mode, fake mode
+
+**Live mode**:
+An AI runtime mode that calls a real model endpoint. It is separate from PayPal's sandbox mode.
+_Avoid_: Real mode, production mode
+
+**Eval**:
+A repeatable check of parse accuracy, reminder text, or webhook replay. Evals report results; they do not replace tests.
+_Avoid_: Benchmark, test suite
 
 **Sandbox mode**:
 A runtime mode that calls the real PayPal sandbox REST API. It moves no real money.

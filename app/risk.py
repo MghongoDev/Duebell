@@ -3,6 +3,7 @@
 The shipped scorer is a rule baseline. It returns a score, a level, and
 reasons a human can check. A separate training script compares a logistic
 regression on synthetic history, but the demo uses this explainable path.
+See ADR 0002.
 """
 
 from __future__ import annotations

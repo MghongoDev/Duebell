@@ -1,6 +1,7 @@
 """Background reminder scan for Duebell (issue #15).
 
 The scheduler only drafts reminders. Sending still needs a human approval.
+See ADR 0003.
 """
 
 from __future__ import annotations

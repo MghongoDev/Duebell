@@ -1,4 +1,4 @@
-"""FastAPI app and routes for Duebell (issues #9, #11, #14, #15, #17)."""
+"""FastAPI app and routes for Duebell (issues #9, #11, #14, #15, #17, #18)."""
 
 from __future__ import annotations
 

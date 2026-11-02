@@ -1,7 +1,7 @@
 """PayPal gateway for Duebell (issues #10, #11).
 
 The app talks to one protocol. A mock adapter keeps the demo offline, and a
-sandbox adapter calls PayPal's Invoicing v2 REST API.
+sandbox adapter calls PayPal's Invoicing v2 REST API. See ADR 0001.
 """
 
 from __future__ import annotations

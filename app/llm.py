@@ -3,6 +3,7 @@
 The model is treated as an untrusted form filler. Its answer must be JSON with
 only known keys, and the result still passes through the same validation as the
 manual form. Prompt injection in the description is data, never instructions.
+See ADR 0004.
 """
 
 from __future__ import annotations

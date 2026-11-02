@@ -8,7 +8,7 @@ This repository is a hackathon entry for the PayPal AI Hackathon. It runs in moc
 
 ## Status
 
-In progress. Phases are tracked in the issue tracker. The master spec is issue #1.
+Hackathon entry for the PayPal AI Hackathon, November 2026. The full flow runs in mock mode. The sandbox adapter is wired but needs your PayPal app to have the Invoicing scope.
 
 ## Quick start
 
@@ -21,6 +21,19 @@ cp .env.example .env
 ```
 
 Open http://127.0.0.1:8000.
+
+## Demo flow
+
+1. Type a sentence such as `Invoice Acme Studio, billing@acme.test, 1200 USD for logo design, net 14 days.`
+2. Click `Fill fields with AI`, check the fields, then click `Create invoice`.
+3. Read the risk badge and its reasons.
+4. Click `Scan now`. Read the pending reminder.
+5. Click `Approve and send`.
+6. Click `Simulate payment`. The status and activity feed update.
+
+The seed script creates six clients with different payment habits, so the risk levels and reminder tones have something to work with.
+
+Step 2 needs `LLM_MODE=live` and a model endpoint. Without it, fill the form by hand. The rest of the flow is unchanged.
 
 ## Modes
 
@@ -55,6 +68,24 @@ The risk model trains on synthetic client histories. Duebell ships an explainabl
 
 ```bash
 .venv/bin/python scripts/train_risk.py
+```
+
+## Sandbox setup
+
+Set `PAYPAL_MODE=sandbox`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, and `PAYPAL_INVOICER_EMAIL` in `.env`. The PayPal app needs the Invoicing scope.
+
+PayPal webhooks need a public HTTPS URL. Expose the app with a tunnel, then register the hook:
+
+```bash
+.venv/bin/python scripts/register_webhook.py --url https://your-tunnel.example/webhooks/paypal
+```
+
+Put the printed id in `PAYPAL_WEBHOOK_ID`. The mock gateway needs none of this.
+
+## Tests
+
+```bash
+.venv/bin/pytest -q
 ```
 
 ## Documentation
