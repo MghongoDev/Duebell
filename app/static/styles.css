@@ -286,6 +286,46 @@ button.ghost {
   color: var(--ink-soft);
 }
 
+button.small {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.76rem;
+}
+
+.row-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.activity {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.activity li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #f0e8da;
+  padding-bottom: 0.5rem;
+}
+
+.activity-type {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.activity time {
+  margin-left: auto;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
+
 .site-footer {
   padding: 0 clamp(1.25rem, 4vw, 3.5rem) 2rem;
   color: var(--ink-soft);

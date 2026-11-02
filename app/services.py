@@ -2,14 +2,26 @@
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
+from typing import Mapping
 from uuid import uuid4
 
 from sqlmodel import Session, select
 
 from app.config import Settings
-from app.models import Client, Invoice, utcnow
+from app.models import Client, Event, Invoice, utcnow
 from app.validation import InvoiceProposal, proposal_to_cents
+
+PAID_STATUSES = {"PAID", "MARKED_AS_PAID"}
+CLOSED_STATUSES = {"PAID", "MARKED_AS_PAID", "CANCELLED", "REFUNDED"}
+
+EVENT_STATUS = {
+    "INVOICING.INVOICE.SENT": "SENT",
+    "INVOICING.INVOICE.PAID": "PAID",
+    "INVOICING.INVOICE.CANCELLED": "CANCELLED",
+    "INVOICING.INVOICE.REFUNDED": "REFUNDED",
+}
 
 
 def get_or_create_client(session: Session, name: str, email: str) -> Client:
@@ -133,3 +145,83 @@ def dashboard_totals(rows: list[dict]) -> dict:
 
 def new_invoice_number() -> str:
     return f"DUE-{utcnow():%Y%m%d}-{uuid4().hex[:6].upper()}"
+
+
+def find_by_paypal_id(session: Session, paypal_invoice_id: str) -> Invoice | None:
+    return session.exec(
+        select(Invoice).where(Invoice.paypal_invoice_id == paypal_invoice_id)
+    ).first()
+
+
+def apply_status(invoice: Invoice, status: str) -> None:
+    invoice.status = status
+    if status in PAID_STATUSES and invoice.paid_at is None:
+        invoice.paid_at = utcnow()
+
+
+def refresh_invoice(session: Session, invoice: Invoice, gateway) -> Invoice:
+    if not invoice.paypal_invoice_id:
+        return invoice
+    status = gateway.get_invoice(invoice.paypal_invoice_id)
+    apply_status(invoice, status)
+    session.add(invoice)
+    session.commit()
+    session.refresh(invoice)
+    return invoice
+
+
+def simulate_payment(session: Session, invoice: Invoice, gateway) -> Invoice:
+    if not invoice.paypal_invoice_id:
+        raise ValueError("Invoice has no PayPal id yet.")
+    gateway.record_payment(invoice.paypal_invoice_id, invoice.amount_cents, invoice.currency)
+    apply_status(invoice, "PAID")
+    session.add(invoice)
+    session.commit()
+    session.refresh(invoice)
+    return invoice
+
+
+def handle_webhook(session: Session, gateway, headers: Mapping[str, str], body: str) -> dict:
+    if not gateway.verify_webhook(headers, body):
+        return {"ok": False, "error": "invalid signature"}
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return {"ok": False, "error": "invalid json"}
+
+    event_id = payload.get("id") or ""
+    event_type = payload.get("event_type") or ""
+    if not event_id:
+        return {"ok": False, "error": "missing event id"}
+
+    existing = session.get(Event, event_id)
+    if existing:
+        return {"ok": True, "duplicate": True}
+
+    resource = payload.get("resource") or {}
+    paypal_invoice_id = resource.get("id") or (resource.get("invoice") or {}).get("id") or ""
+    status = EVENT_STATUS.get(event_type)
+    applied = False
+    if paypal_invoice_id and status:
+        invoice = find_by_paypal_id(session, paypal_invoice_id)
+        if invoice:
+            apply_status(invoice, status)
+            session.add(invoice)
+            applied = True
+
+    session.add(
+        Event(
+            paypal_event_id=event_id,
+            event_type=event_type,
+            payload=body[:20000],
+        )
+    )
+    session.commit()
+    return {"ok": True, "applied": applied, "status": status}
+
+
+def list_events(session: Session, limit: int = 20) -> list[Event]:
+    return list(
+        session.exec(select(Event).order_by(Event.received_at.desc()).limit(limit)).all()
+    )

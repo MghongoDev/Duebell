@@ -84,6 +84,7 @@
           <th>Due</th>
           <th>Status</th>
           <th>Risk</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
@@ -112,6 +113,12 @@
             <span class="muted">Not scored</span>
             {% endif %}
           </td>
+          <td class="row-actions">
+            <button class="ghost small" data-action="refresh" data-id="{{ row.id }}">Refresh</button>
+            {% if row.status not in ['PAID', 'CANCELLED', 'REFUNDED'] %}
+            <button class="ghost small" data-action="pay" data-id="{{ row.id }}">Simulate payment</button>
+            {% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -123,4 +130,43 @@
   </div>
   {% endif %}
 </section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Activity</h2>
+    <p>What PayPal told the app.</p>
+  </div>
+  {% if events %}
+  <ul class="activity">
+    {% for event in events %}
+    <li>
+      <span class="activity-type">{{ event.event_type }}</span>
+      <span class="muted">{{ event.event_id }}</span>
+      <time>{{ event.received_at }}</time>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="empty"><p>No PayPal events yet.</p></div>
+  {% endif %}
+</section>
+
+<script>
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-action]");
+  if (!button) return;
+  const path = button.dataset.action === "pay" ? "simulate-payment" : "refresh";
+  button.disabled = true;
+  try {
+    const response = await fetch(`/api/invoices/${button.dataset.id}/${path}`, { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) {
+      window.alert(data.error || "That did not work.");
+    }
+  } catch (error) {
+    window.alert("Could not reach the server.");
+  }
+  window.location.reload();
+});
+</script>
 {% endblock %}

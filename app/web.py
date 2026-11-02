@@ -17,12 +17,28 @@ from app.paypal import PayPalError, build_gateway
 from app.services import (
     create_invoice,
     dashboard_totals,
+    get_invoice,
+    handle_webhook,
     invoice_rows,
+    list_events,
+    refresh_invoice,
+    simulate_payment,
 )
 from app.validation import FieldError, InvoiceProposal, validate_proposal
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+
+def _activity_rows(session: Session) -> list[dict]:
+    return [
+        {
+            "event_id": event.paypal_event_id,
+            "event_type": event.event_type,
+            "received_at": event.received_at.strftime("%d %b %H:%M"),
+        }
+        for event in list_events(session)
+    ]
 
 
 def _render_dashboard(
@@ -40,6 +56,7 @@ def _render_dashboard(
         context={
             "rows": rows,
             "totals": dashboard_totals(rows),
+            "events": _activity_rows(session),
             "errors": errors or [],
             "form": form or {},
         },
@@ -143,6 +160,48 @@ def create_app(
     @app.get("/api/invoices", response_class=JSONResponse)
     def api_invoices(session: Session = Depends(get_session)):
         return invoice_rows(session)
+
+    @app.post("/api/invoices/{invoice_id}/refresh", response_class=JSONResponse)
+    def api_refresh(
+        invoice_id: int,
+        request: Request,
+        session: Session = Depends(get_session),
+    ):
+        invoice = get_invoice(session, invoice_id)
+        if invoice is None:
+            return JSONResponse({"ok": False, "error": "Invoice not found."}, status_code=404)
+        try:
+            refresh_invoice(session, invoice, request.app.state.gateway)
+        except PayPalError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+        return {"ok": True, "status": invoice.status}
+
+    @app.post("/api/invoices/{invoice_id}/simulate-payment", response_class=JSONResponse)
+    def api_simulate_payment(
+        invoice_id: int,
+        request: Request,
+        session: Session = Depends(get_session),
+    ):
+        invoice = get_invoice(session, invoice_id)
+        if invoice is None:
+            return JSONResponse({"ok": False, "error": "Invoice not found."}, status_code=404)
+        try:
+            simulate_payment(session, invoice, request.app.state.gateway)
+        except (PayPalError, ValueError) as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+        return {"ok": True, "status": invoice.status}
+
+    @app.post("/webhooks/paypal", response_class=JSONResponse)
+    async def paypal_webhook(request: Request, session: Session = Depends(get_session)):
+        body = (await request.body()).decode("utf-8")
+        result = handle_webhook(
+            session,
+            request.app.state.gateway,
+            dict(request.headers),
+            body,
+        )
+        status_code = 200 if result.get("ok") else 400
+        return JSONResponse(result, status_code=status_code)
 
     return app
 
