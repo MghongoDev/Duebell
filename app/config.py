@@ -24,6 +24,7 @@ class Settings:
     paypal_client_id: str = ""
     paypal_client_secret: str = ""
     paypal_webhook_id: str = ""
+    paypal_invoicer_email: str = ""
     paypal_base_url: str = "https://api-m.sandbox.paypal.com"
     anthropic_api_key: str = ""
     anthropic_base_url: str = ""
@@ -52,6 +53,7 @@ def get_settings() -> Settings:
         paypal_client_id=os.getenv("PAYPAL_CLIENT_ID", "").strip(),
         paypal_client_secret=os.getenv("PAYPAL_CLIENT_SECRET", "").strip(),
         paypal_webhook_id=os.getenv("PAYPAL_WEBHOOK_ID", "").strip(),
+        paypal_invoicer_email=os.getenv("PAYPAL_INVOICER_EMAIL", "").strip(),
         paypal_base_url=os.getenv("PAYPAL_BASE_URL", "https://api-m.sandbox.paypal.com").rstrip("/"),
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", "").strip(),
         anthropic_base_url=os.getenv("ANTHROPIC_BASE_URL", "").rstrip("/"),

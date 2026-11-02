@@ -32,7 +32,7 @@ def next_invoice_number(session: Session) -> str:
     return f"DUE-{utcnow():%Y%m%d}-{count:04d}"
 
 
-def create_invoice(session: Session, proposal: InvoiceProposal, settings: Settings) -> Invoice:
+def create_invoice(session: Session, proposal: InvoiceProposal, settings: Settings, gateway) -> Invoice:
     client = get_or_create_client(session, proposal.client_name, proposal.client_email)
     now = utcnow()
     invoice = Invoice(
@@ -46,6 +46,27 @@ def create_invoice(session: Session, proposal: InvoiceProposal, settings: Settin
         due_at=now + timedelta(days=proposal.terms_days),
         status="DRAFT",
     )
+    session.add(invoice)
+    session.commit()
+    session.refresh(invoice)
+
+    paypal_id = gateway.create_invoice(
+        invoice_number=invoice.invoice_number,
+        amount_cents=invoice.amount_cents,
+        currency=invoice.currency,
+        description=invoice.description,
+        terms_days=invoice.terms_days,
+        client_name=client.name,
+        client_email=client.email,
+        issued_at=invoice.issued_at,
+        due_at=invoice.due_at,
+    )
+    invoice.paypal_invoice_id = paypal_id
+    session.add(invoice)
+    session.commit()
+
+    gateway.send_invoice(paypal_id)
+    invoice.status = "SENT"
     session.add(invoice)
     session.commit()
     session.refresh(invoice)

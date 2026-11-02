@@ -1,4 +1,6 @@
-"""HTTP seam tests for invoice creation and listing (issue #9)."""
+"""HTTP seam tests for invoice creation and listing (issues #9, #10)."""
+
+from app.paypal import PayPalError
 
 FORM = {
     "client_name": "Acme Studio",
@@ -24,7 +26,30 @@ def test_api_lists_created_invoice(client):
     assert len(rows) == 1
     assert rows[0]["client_name"] == "Acme Studio"
     assert rows[0]["amount_cents"] == 120000
-    assert rows[0]["status"] == "DRAFT"
+    assert rows[0]["status"] == "SENT"
+    assert rows[0]["paypal_invoice_id"]
+
+
+def test_create_sends_through_gateway(client):
+    client.post("/invoices", data=FORM, follow_redirects=False)
+    gateway = client.app.state.gateway
+    assert len(gateway.invoices) == 1
+    assert next(iter(gateway.invoices.values()))["status"] == "SENT"
+
+
+def test_paypal_failure_is_readable(settings):
+    from fastapi.testclient import TestClient
+    from app.models import make_engine
+    from app.web import create_app
+
+    class FailingGateway:
+        def create_invoice(self, **kwargs):
+            raise PayPalError("PayPal rejected the call: sandbox said no.")
+
+    app = create_app(settings=settings, engine=make_engine(settings.database_url), gateway=FailingGateway())
+    response = TestClient(app).post("/invoices", data=FORM)
+    assert response.status_code == 502
+    assert "sandbox said no" in response.text
 
 
 def test_bad_email_returns_field_error(client):

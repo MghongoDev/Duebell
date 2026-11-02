@@ -13,6 +13,7 @@ from sqlmodel import Session
 
 from app.config import Settings, get_settings
 from app.models import init_db, make_engine
+from app.paypal import PayPalError, build_gateway
 from app.services import (
     create_invoice,
     dashboard_totals,
@@ -55,6 +56,7 @@ def create_app(
     settings = settings or get_settings()
     engine = engine or make_engine(settings.database_url)
     init_db(engine)
+    gateway = gateway or build_gateway(settings)
 
     app = FastAPI(title="Duebell", version="0.1.0")
     app.state.settings = settings
@@ -126,7 +128,16 @@ def create_app(
         if errors:
             return _render_dashboard(request, session, errors=errors, form=form, status_code=422)
 
-        create_invoice(session, proposal, request.app.state.settings)
+        try:
+            create_invoice(session, proposal, request.app.state.settings, request.app.state.gateway)
+        except PayPalError as exc:
+            return _render_dashboard(
+                request,
+                session,
+                errors=[FieldError("paypal", str(exc))],
+                form=form,
+                status_code=502,
+            )
         return RedirectResponse(url="/", status_code=303)
 
     @app.get("/api/invoices", response_class=JSONResponse)
