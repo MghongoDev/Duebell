@@ -36,6 +36,15 @@
   </div>
   {% endif %}
 
+  <div class="ai-draft">
+    <label class="wide">
+      <span>Describe the invoice</span>
+      <textarea id="ai-text" rows="2" placeholder="Invoice Acme Studio 1200 USD for logo design, net 14 days."></textarea>
+    </label>
+    <button type="button" class="ghost" id="ai-fill">Fill fields with AI</button>
+    <p class="hint">The AI fills the fields. You still confirm before anything reaches PayPal.</p>
+  </div>
+
   <form method="post" action="/invoices" class="invoice-form">
     <label>
       <span>Client name</span>
@@ -167,6 +176,35 @@ document.addEventListener("click", async (event) => {
     window.alert("Could not reach the server.");
   }
   window.location.reload();
+});
+
+document.getElementById("ai-fill").addEventListener("click", async () => {
+  const text = document.getElementById("ai-text").value.trim();
+  if (!text) {
+    window.alert("Write a sentence or two first.");
+    return;
+  }
+  const button = document.getElementById("ai-fill");
+  button.disabled = true;
+  try {
+    const response = await fetch("/parse", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ description: text }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      window.alert(data.error || "Could not parse that. Fill the form instead.");
+    } else {
+      for (const [key, value] of Object.entries(data.proposal)) {
+        const field = document.querySelector(`[name="${key}"]`);
+        if (field) field.value = value;
+      }
+    }
+  } catch (error) {
+    window.alert("Could not reach the server.");
+  }
+  button.disabled = false;
 });
 </script>
 {% endblock %}

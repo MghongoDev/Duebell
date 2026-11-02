@@ -12,6 +12,7 @@ from pydantic import ValidationError as PydanticValidationError
 from sqlmodel import Session
 
 from app.config import Settings, get_settings
+from app.llm import LLMError, build_parser
 from app.models import init_db, make_engine
 from app.paypal import PayPalError, build_gateway
 from app.services import (
@@ -79,7 +80,7 @@ def create_app(
     app.state.settings = settings
     app.state.engine = engine
     app.state.gateway = gateway
-    app.state.llm = llm
+    app.state.llm = llm or build_parser(settings)
 
     app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
@@ -156,6 +157,18 @@ def create_app(
                 status_code=502,
             )
         return RedirectResponse(url="/", status_code=303)
+
+    @app.post("/parse", response_class=JSONResponse)
+    async def parse_description(request: Request):
+        form = await request.form()
+        text = str(form.get("description", "")).strip()
+        if not text:
+            return JSONResponse({"ok": False, "error": "Write a sentence or two first."}, status_code=422)
+        try:
+            proposal = request.app.state.llm(text)
+        except LLMError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
+        return JSONResponse({"ok": True, "proposal": proposal.model_dump(mode="json")})
 
     @app.get("/api/invoices", response_class=JSONResponse)
     def api_invoices(session: Session = Depends(get_session)):

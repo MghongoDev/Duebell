@@ -168,7 +168,8 @@ body {
   grid-column: 1 / -1;
 }
 
-.invoice-form input {
+.invoice-form input,
+.invoice-form textarea {
   font: inherit;
   color: var(--ink);
   background: #fff;
@@ -177,10 +178,35 @@ body {
   padding: 0.6rem 0.7rem;
 }
 
-.invoice-form input:focus {
+.invoice-form input:focus,
+.invoice-form textarea:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
   border-color: var(--accent);
+}
+
+.ai-draft {
+  display: grid;
+  gap: 0.6rem;
+  justify-items: start;
+  border-bottom: 1px solid #f0e8da;
+  margin-bottom: 1.1rem;
+  padding-bottom: 1.1rem;
+}
+
+.ai-draft label {
+  width: 100%;
+}
+
+.ai-draft textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.hint {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
 }
 
 .form-actions {
