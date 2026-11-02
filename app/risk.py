@@ -91,12 +91,19 @@ def score_invoice(
         score = 0.18
         score += 0.45 * features["late_share"]
         score += 0.35 * min(features["average_days_late"] / 30.0, 1.0)
-        if features["late_count"] == 0:
-            reasons.append(f"Paid all {features['prior_count']} prior invoices on time.")
+        prior = features["prior_count"]
+        late = features["late_count"]
+        invoice_word = "invoice" if prior == 1 else "invoices"
+        days = round(features["average_days_late"])
+        day_word = "day" if days == 1 else "days"
+        if late == 0:
+            if prior == 1:
+                reasons.append("Paid the only prior invoice on time.")
+            else:
+                reasons.append(f"Paid all {prior} prior invoices on time.")
         else:
             reasons.append(
-                f"Paid {features['late_count']} of last {features['prior_count']} invoices late, "
-                f"average {features['average_days_late']:.0f} days."
+                f"Paid {late} of last {prior} {invoice_word} late, average {days} {day_word}."
             )
 
     if features["amount_ratio"] >= 1.5:

@@ -29,6 +29,14 @@ Open http://127.0.0.1:8000.
 - `LLM_MODE=mock` uses a deterministic parser and reminder writer.
 - `LLM_MODE=live` calls an Anthropic-compatible endpoint.
 
+## Synthetic data
+
+The risk model trains on synthetic client histories. Duebell ships an explainable rule baseline, and a logistic-regression script compares its held-out result beside the baseline. The comparison is a demonstration, not a claim about real clients.
+
+```bash
+.venv/bin/python scripts/train_risk.py
+```
+
 ## Documentation
 
 - `GLOSSARY.md`: domain terms.
