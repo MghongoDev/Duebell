@@ -26,8 +26,28 @@ Open http://127.0.0.1:8000.
 
 - `PAYPAL_MODE=mock` uses an in-memory PayPal adapter.
 - `PAYPAL_MODE=sandbox` calls the PayPal sandbox REST API.
-- `LLM_MODE=mock` uses a deterministic parser and reminder writer.
+- `LLM_MODE=mock` disables AI parsing. The manual form and the reminder draft writer still work.
 - `LLM_MODE=live` calls an Anthropic-compatible endpoint.
+
+## Evals
+
+The reminder and webhook evals run offline. The parse eval needs a live model.
+
+```bash
+.venv/bin/python scripts/evals.py
+LLM_MODE=live .venv/bin/python scripts/evals.py
+```
+
+## Security and limits
+
+Duebell is a single-user sandbox demo. It has no login, so do not expose it on the public internet.
+
+- PayPal webhook signatures are verified before any state changes.
+- Events are deduplicated by PayPal event id.
+- Inputs are length-limited, amounts are capped, and currencies are allowlisted.
+- Webhook payloads are capped at 1 MB.
+- Security headers and a content security policy are set on every response.
+- Secrets live in `.env`, which is ignored by git. `.env.example` lists the names.
 
 ## Synthetic data
 

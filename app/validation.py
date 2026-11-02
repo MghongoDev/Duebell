@@ -35,17 +35,23 @@ def proposal_to_cents(amount: Decimal) -> int:
 def validate_proposal(proposal: InvoiceProposal, settings: Settings) -> list[FieldError]:
     errors: list[FieldError] = []
 
-    if not proposal.client_name.strip():
+    name = proposal.client_name.strip()
+    if not name:
         errors.append(FieldError("client_name", "Client name is required."))
+    elif len(name) > 120:
+        errors.append(FieldError("client_name", "Client name must be 120 characters or fewer."))
 
     email = proposal.client_email.strip()
     if not email:
         errors.append(FieldError("client_email", "Client email is required."))
-    elif not EMAIL_RE.match(email):
+    elif len(email) > 254 or not EMAIL_RE.match(email):
         errors.append(FieldError("client_email", "Enter a valid email address."))
 
-    if not proposal.description.strip():
+    description = proposal.description.strip()
+    if not description:
         errors.append(FieldError("description", "Describe the work."))
+    elif len(description) > 500:
+        errors.append(FieldError("description", "Description must be 500 characters or fewer."))
 
     try:
         cents = proposal_to_cents(proposal.amount)

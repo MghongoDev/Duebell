@@ -37,6 +37,8 @@ from app.validation import FieldError, InvoiceProposal, validate_proposal
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+MAX_WEBHOOK_BYTES = 1_000_000
+MAX_PROMPT_CHARS = 2_000
 
 
 def _activity_rows(session: Session) -> list[dict]:
@@ -101,6 +103,21 @@ def create_app(
     app.state.llm = llm or build_parser(settings)
     app.state.scheduler_enabled = scheduler_enabled
     app.state.scheduler = None
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; "
+            "frame-ancestors 'none'"
+        )
+        return response
 
     app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
@@ -184,6 +201,11 @@ def create_app(
         text = str(form.get("description", "")).strip()
         if not text:
             return JSONResponse({"ok": False, "error": "Write a sentence or two first."}, status_code=422)
+        if len(text) > MAX_PROMPT_CHARS:
+            return JSONResponse(
+                {"ok": False, "error": f"Keep the description under {MAX_PROMPT_CHARS:,} characters."},
+                status_code=422,
+            )
         try:
             proposal = request.app.state.llm(text)
         except LLMError as exc:
@@ -263,7 +285,16 @@ def create_app(
 
     @app.post("/webhooks/paypal", response_class=JSONResponse)
     async def paypal_webhook(request: Request, session: Session = Depends(get_session)):
-        body = (await request.body()).decode("utf-8")
+        try:
+            declared = int(request.headers.get("content-length", "0") or 0)
+        except ValueError:
+            declared = 0
+        if declared > MAX_WEBHOOK_BYTES:
+            return JSONResponse({"ok": False, "error": "payload too large"}, status_code=413)
+        raw = await request.body()
+        if len(raw) > MAX_WEBHOOK_BYTES:
+            return JSONResponse({"ok": False, "error": "payload too large"}, status_code=413)
+        body = raw.decode("utf-8")
         result = handle_webhook(
             session,
             request.app.state.gateway,
