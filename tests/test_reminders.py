@@ -8,7 +8,13 @@ from sqlmodel import Session
 
 from app.config import Settings
 from app.models import Client, Invoice, utcnow
-from app.reminders import dismiss_reminder, draft_reminders, reminder_text, send_reminder
+from app.reminders import (
+    draft_reminders,
+    edit_reminder,
+    reject_reminder,
+    reminder_text,
+    send_reminder,
+)
 from app.services import create_invoice
 from app.validation import InvoiceProposal
 
@@ -104,12 +110,31 @@ def test_approval_sends_once(client):
             send_reminder(session, reminder, client.app.state.gateway)
 
 
-def test_dismiss_keeps_paypal_quiet(client):
+def test_edit_changes_the_draft_without_sending(client):
     seed_invoice(client)
     with Session(client.app.state.engine) as session:
         reminder = draft_reminders(session, client.app.state.settings)[0]
-        dismiss_reminder(session, reminder)
-        assert reminder.status == "DISMISSED"
+        edit_reminder(session, reminder, "A shorter, warmer nudge.")
+        assert reminder.status == "PENDING"
+        assert reminder.draft_text == "A shorter, warmer nudge."
+        assert reminder.tone == "custom"
+    assert client.app.state.gateway.sent_reminders == []
+
+
+def test_edit_refuses_an_empty_draft(client):
+    seed_invoice(client)
+    with Session(client.app.state.engine) as session:
+        reminder = draft_reminders(session, client.app.state.settings)[0]
+        with pytest.raises(ValueError, match="cannot be empty"):
+            edit_reminder(session, reminder, "   ")
+
+
+def test_reject_keeps_paypal_quiet(client):
+    seed_invoice(client)
+    with Session(client.app.state.engine) as session:
+        reminder = draft_reminders(session, client.app.state.settings)[0]
+        reject_reminder(session, reminder)
+        assert reminder.status == "REJECTED"
     assert client.app.state.gateway.sent_reminders == []
 
 
@@ -126,13 +151,48 @@ def test_http_scan_and_approve(client):
     assert len(client.app.state.gateway.sent_reminders) == 1
 
 
-def test_http_dismiss(client):
+def test_http_edit_then_approve_sends_the_edited_text(client):
     seed_invoice(client)
     client.post("/api/reminders/scan")
     reminder_id = client.get("/api/reminders").json()[0]["id"]
-    response = client.post(f"/api/reminders/{reminder_id}/dismiss")
+    response = client.post(
+        f"/api/reminders/{reminder_id}/edit",
+        data={"draft_text": "Custom nudge from the operator."},
+    )
     assert response.status_code == 200
-    assert response.json()["status"] == "DISMISSED"
+    assert response.json()["draft_text"] == "Custom nudge from the operator."
+    approve = client.post(f"/api/reminders/{reminder_id}/approve")
+    assert approve.status_code == 200
+    sent = client.app.state.gateway.sent_reminders[0]
+    assert sent["note"] == "Custom nudge from the operator."
+
+
+def test_http_edit_rejects_an_empty_draft(client):
+    seed_invoice(client)
+    client.post("/api/reminders/scan")
+    reminder_id = client.get("/api/reminders").json()[0]["id"]
+    response = client.post(f"/api/reminders/{reminder_id}/edit", data={"draft_text": "  "})
+    assert response.status_code == 422
+
+
+def test_http_edit_rejects_a_sent_draft(client):
+    seed_invoice(client)
+    client.post("/api/reminders/scan")
+    reminder_id = client.get("/api/reminders").json()[0]["id"]
+    client.post(f"/api/reminders/{reminder_id}/approve")
+    response = client.post(
+        f"/api/reminders/{reminder_id}/edit", data={"draft_text": "Too late."}
+    )
+    assert response.status_code == 409
+
+
+def test_http_reject(client):
+    seed_invoice(client)
+    client.post("/api/reminders/scan")
+    reminder_id = client.get("/api/reminders").json()[0]["id"]
+    response = client.post(f"/api/reminders/{reminder_id}/reject")
+    assert response.status_code == 200
+    assert response.json()["status"] == "REJECTED"
 
 
 def test_dashboard_shows_reminder_panel(client):
@@ -141,3 +201,7 @@ def test_dashboard_shows_reminder_panel(client):
     page = client.get("/")
     assert page.status_code == 200
     assert "Approve and send" in page.text
+    assert "Save draft" in page.text
+    assert "Reject draft" in page.text
+    assert 'class="draft-edit"' in page.text
+    assert 'id="action-error"' in page.text

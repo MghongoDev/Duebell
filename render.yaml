@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: duebell
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.web:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: PAYPAL_MODE
+        value: mock
+      - key: LLM_MODE
+        value: mock
+      - key: DATABASE_URL
+        value: sqlite:///./duebell.db
+      - key: AMOUNT_CAP_CENTS
+        value: "1000000"
+      - key: ALLOWED_CURRENCIES
+        value: USD
+      - key: TERMS_MIN_DAYS
+        value: "0"
+      - key: TERMS_MAX_DAYS
+        value: "120"
+      - key: REMINDER_WINDOW_DAYS
+        value: "3"

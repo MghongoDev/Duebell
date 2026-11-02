@@ -1,8 +1,8 @@
-"""Reminder drafting, approval, and dismissal (issue #15).
+"""Reminder drafting, editing, approval, and rejection (issue #15).
 
-Scanning only creates drafts. A human must approve a draft before Duebell asks
-PayPal to send a reminder. The draft uses only facts already on the invoice.
-See ADR 0003.
+Scanning only creates drafts. A human must edit or approve a draft before
+Duebell asks PayPal to send a reminder. The draft uses only facts already on
+the invoice. See ADR 0003.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from app.models import Client, Invoice, Reminder, utcnow
 
 REMINDABLE_STATUSES = {"SENT", "OVERDUE"}
 BLOCKING_REMINDER_STATUSES = {"PENDING", "SENT"}
+MAX_DRAFT_CHARS = 2_000
 
 
 def money(cents: int) -> str:
@@ -123,10 +124,26 @@ def send_reminder(session: Session, reminder: Reminder, gateway) -> Reminder:
     return reminder
 
 
-def dismiss_reminder(session: Session, reminder: Reminder) -> Reminder:
+def edit_reminder(session: Session, reminder: Reminder, text: str) -> Reminder:
     if reminder.status != "PENDING":
-        raise ValueError("Only a pending draft can be dismissed.")
-    reminder.status = "DISMISSED"
+        raise ValueError("Only a pending draft can be edited.")
+    text = text.strip()
+    if not text:
+        raise ValueError("The draft cannot be empty.")
+    if len(text) > MAX_DRAFT_CHARS:
+        raise ValueError(f"Keep the draft under {MAX_DRAFT_CHARS:,} characters.")
+    reminder.draft_text = text
+    reminder.tone = "custom"
+    session.add(reminder)
+    session.commit()
+    session.refresh(reminder)
+    return reminder
+
+
+def reject_reminder(session: Session, reminder: Reminder) -> Reminder:
+    if reminder.status != "PENDING":
+        raise ValueError("Only a pending draft can be rejected.")
+    reminder.status = "REJECTED"
     session.add(reminder)
     session.commit()
     session.refresh(reminder)

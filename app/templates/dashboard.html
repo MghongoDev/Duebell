@@ -19,6 +19,8 @@
   </article>
 </section>
 
+<div id="action-error" class="alert" role="alert" hidden></div>
+
 <section class="panel create-panel">
   <div class="panel-head">
     <h2>New invoice</h2>
@@ -39,7 +41,7 @@
   <div class="ai-draft">
     <label class="wide">
       <span>Describe the invoice</span>
-      <textarea id="ai-text" rows="2" placeholder="Invoice Acme Studio 1200 USD for logo design, net 14 days."></textarea>
+      <textarea id="ai-text" rows="2" placeholder="Invoice Acme Studio, billing@acme.test, 1200 USD for logo design, net 14 days."></textarea>
     </label>
     <button type="button" class="ghost" id="ai-fill">Fill fields with AI</button>
     <p class="hint">The AI fills the fields. You still confirm before anything reaches PayPal.</p>
@@ -92,12 +94,15 @@
         <strong>{{ reminder.invoice_number }} · {{ reminder.client_name }}</strong>
         <span class="status reminder-status-{{ reminder.status|lower }}">{{ reminder.status }}</span>
       </div>
-      <pre class="draft">{{ reminder.draft_text }}</pre>
       {% if reminder.status == 'PENDING' %}
+      <textarea class="draft-edit" data-draft-id="{{ reminder.id }}" rows="6">{{ reminder.draft_text }}</textarea>
       <div class="row-actions">
+        <button class="ghost small" data-reminder-action="save" data-id="{{ reminder.id }}">Save draft</button>
         <button class="small" data-reminder-action="approve" data-id="{{ reminder.id }}">Approve and send</button>
-        <button class="ghost small" data-reminder-action="dismiss" data-id="{{ reminder.id }}">Dismiss</button>
+        <button class="ghost small" data-reminder-action="reject" data-id="{{ reminder.id }}">Reject draft</button>
       </div>
+      {% else %}
+      <pre class="draft">{{ reminder.draft_text }}</pre>
       {% endif %}
     </li>
     {% endfor %}
@@ -130,6 +135,7 @@
       <option value="LOW">Low</option>
     </select>
   </div>
+  <p id="grid-loading" class="muted grid-loading">Loading invoices...</p>
   <div id="invoice-grid" class="ag-theme-quartz invoice-grid" role="table" aria-label="Invoices"></div>
   <script id="invoice-data" type="application/json">{{ rows | tojson }}</script>
 </section>
@@ -206,8 +212,11 @@ const gridOptions = {
   localeText: { noRowsToShow: "No invoices yet. Create the first one above." },
 };
 
+const gridLoading = document.getElementById("grid-loading");
+
 if (window.agGrid && gridElement) {
   const gridApi = agGrid.createGrid(gridElement, gridOptions);
+  if (gridLoading) gridLoading.hidden = true;
   document.getElementById("grid-search").addEventListener("input", (event) => {
     gridApi.setGridOption("quickFilterText", event.target.value);
   });
@@ -220,64 +229,85 @@ if (window.agGrid && gridElement) {
     gridApi.onFilterChanged();
   });
 } else if (gridElement) {
+  if (gridLoading) gridLoading.hidden = true;
   gridElement.innerHTML = '<div class="empty"><p>Could not load the invoice grid. Refresh the page.</p></div>';
 }
 
-document.addEventListener("click", async (event) => {
+function showError(message) {
+  const box = document.getElementById("action-error");
+  box.textContent = message;
+  box.hidden = false;
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function clearError() {
+  const box = document.getElementById("action-error");
+  box.hidden = true;
+  box.textContent = "";
+}
+
+async function runAction(button, label, path, options = {}) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = label;
+  clearError();
+  try {
+    const response = await fetch(path, { ...options, method: "POST" });
+    const data = await response.json();
+    if (!response.ok) {
+      showError(data.error || "That did not work.");
+      button.disabled = false;
+      button.textContent = original;
+      return;
+    }
+    window.location.reload();
+  } catch (error) {
+    showError("Could not reach the server. Check your connection and try again.");
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-action]");
   if (!button) return;
   const path = button.dataset.action === "pay" ? "simulate-payment" : "refresh";
-  button.disabled = true;
-  try {
-    const response = await fetch(`/api/invoices/${button.dataset.id}/${path}`, { method: "POST" });
-    const data = await response.json();
-    if (!response.ok) {
-      window.alert(data.error || "That did not work.");
-    }
-  } catch (error) {
-    window.alert("Could not reach the server.");
-  }
-  window.location.reload();
+  runAction(button, "Working...", `/api/invoices/${button.dataset.id}/${path}`);
 });
 
-document.getElementById("scan-reminders").addEventListener("click", async () => {
-  const button = document.getElementById("scan-reminders");
-  button.disabled = true;
-  try {
-    const response = await fetch("/api/reminders/scan", { method: "POST" });
-    const data = await response.json();
-    if (!response.ok) window.alert(data.error || "Could not scan for reminders.");
-  } catch (error) {
-    window.alert("Could not reach the server.");
-  }
-  window.location.reload();
+const scanButton = document.getElementById("scan-reminders");
+scanButton.addEventListener("click", () => {
+  runAction(scanButton, "Scanning...", "/api/reminders/scan");
 });
 
-document.addEventListener("click", async (event) => {
+document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-reminder-action]");
   if (!button) return;
-  button.disabled = true;
-  try {
-    const response = await fetch(
-      `/api/reminders/${button.dataset.id}/${button.dataset.reminderAction}`,
-      { method: "POST" }
-    );
-    const data = await response.json();
-    if (!response.ok) window.alert(data.error || "That did not work.");
-  } catch (error) {
-    window.alert("Could not reach the server.");
+  const action = button.dataset.reminderAction;
+  const id = button.dataset.id;
+  if (action === "save") {
+    const field = document.querySelector(`[data-draft-id="${id}"]`);
+    const body = new URLSearchParams({ draft_text: field ? field.value : "" });
+    runAction(button, "Saving...", `/api/reminders/${id}/edit`, {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    return;
   }
-  window.location.reload();
+  runAction(button, "Working...", `/api/reminders/${id}/${action}`);
 });
 
 document.getElementById("ai-fill").addEventListener("click", async () => {
   const text = document.getElementById("ai-text").value.trim();
   if (!text) {
-    window.alert("Write a sentence or two first.");
+    showError("Write a sentence or two first.");
     return;
   }
   const button = document.getElementById("ai-fill");
+  const original = button.textContent;
   button.disabled = true;
+  button.textContent = "Filling...";
+  clearError();
   try {
     const response = await fetch("/parse", {
       method: "POST",
@@ -286,7 +316,7 @@ document.getElementById("ai-fill").addEventListener("click", async () => {
     });
     const data = await response.json();
     if (!response.ok) {
-      window.alert(data.error || "Could not parse that. Fill the form instead.");
+      showError(data.error || "Could not parse that. Fill the form instead.");
     } else {
       for (const [key, value] of Object.entries(data.proposal)) {
         const field = document.querySelector(`[name="${key}"]`);
@@ -294,9 +324,11 @@ document.getElementById("ai-fill").addEventListener("click", async () => {
       }
     }
   } catch (error) {
-    window.alert("Could not reach the server.");
+    showError("Could not reach the server. Check your connection and try again.");
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
   }
-  button.disabled = false;
 });
 </script>
 {% endblock %}

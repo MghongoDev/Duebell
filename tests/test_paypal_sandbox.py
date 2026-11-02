@@ -2,6 +2,8 @@
 
 from datetime import datetime, timezone
 
+import httpx
+
 from app.config import Settings
 from app.paypal import SandboxPayPal, term_type
 
@@ -76,6 +78,37 @@ def test_create_invoice_sends_a_valid_payload():
     assert body["detail"]["payment_term"]["term_type"] == "NET_15"
     assert body["items"][0]["unit_amount"] == {"currency_code": "USD", "value": "1200.00"}
     assert body["primary_recipients"][0]["billing_info"]["email_address"] == "billing@acme.test"
+
+
+def test_create_invoice_retries_a_transport_error():
+    class FlakyClient(FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.failures = 1
+
+        def request(self, method, url, **kwargs):
+            if self.failures:
+                self.failures -= 1
+                raise httpx.ConnectError("network down")
+            return super().request(method, url, **kwargs)
+
+    fake = FlakyClient()
+    gateway = SandboxPayPal(settings(), client=fake, retry_delay=0)
+    paypal_id = gateway.create_invoice(
+        invoice_number="DUE-1",
+        amount_cents=120000,
+        currency="USD",
+        description="Logo design",
+        terms_days=14,
+        client_name="Acme Studio",
+        client_email="billing@acme.test",
+        issued_at=NOW,
+        due_at=NOW,
+    )
+    assert paypal_id == "INV-1"
+    invoice_calls = [item for item in fake.requests if item[1] == "/v2/invoicing/invoices"]
+    assert len(invoice_calls) == 1
+    assert fake.failures == 0
 
 
 def test_webhook_check_refuses_without_a_webhook_id():

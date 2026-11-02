@@ -18,8 +18,9 @@ from app.llm import LLMError, build_parser
 from app.models import Reminder, init_db, make_engine
 from app.paypal import PayPalError, build_gateway
 from app.reminders import (
-    dismiss_reminder,
     draft_reminders,
+    edit_reminder,
+    reject_reminder,
     reminder_rows,
     send_reminder,
 )
@@ -238,13 +239,34 @@ def create_app(
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
         return {"ok": True, "status": reminder.status}
 
-    @app.post("/api/reminders/{reminder_id}/dismiss", response_class=JSONResponse)
-    def api_dismiss_reminder(reminder_id: int, session: Session = Depends(get_session)):
+    @app.post("/api/reminders/{reminder_id}/edit", response_class=JSONResponse)
+    async def api_edit_reminder(
+        reminder_id: int,
+        request: Request,
+        session: Session = Depends(get_session),
+    ):
+        reminder = session.get(Reminder, reminder_id)
+        if reminder is None:
+            return JSONResponse({"ok": False, "error": "Reminder not found."}, status_code=404)
+        if reminder.status != "PENDING":
+            return JSONResponse(
+                {"ok": False, "error": "Only a pending draft can be edited."},
+                status_code=409,
+            )
+        form = await request.form()
+        try:
+            edit_reminder(session, reminder, str(form.get("draft_text", "")))
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
+        return {"ok": True, "draft_text": reminder.draft_text}
+
+    @app.post("/api/reminders/{reminder_id}/reject", response_class=JSONResponse)
+    def api_reject_reminder(reminder_id: int, session: Session = Depends(get_session)):
         reminder = session.get(Reminder, reminder_id)
         if reminder is None:
             return JSONResponse({"ok": False, "error": "Reminder not found."}, status_code=404)
         try:
-            dismiss_reminder(session, reminder)
+            reject_reminder(session, reminder)
         except ValueError as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
         return {"ok": True, "status": reminder.status}

@@ -101,6 +101,36 @@ CASES = [
             "terms_days": 45,
         },
     },
+    {
+        "text": "Invoice Glow Analytics, invoices@glow.test, 9,500.00 USD for a data audit, net 30 days.",
+        "expect": {
+            "client_name": "Glow Analytics",
+            "client_email": "invoices@glow.test",
+            "amount": "9500.00",
+            "currency": "USD",
+            "terms_days": 30,
+        },
+    },
+    {
+        "text": "Invoice Pine and Moss, hello@pinemoss.test, 320 USD for packaging design, net 14 days.",
+        "expect": {
+            "client_name": "Pine and Moss",
+            "client_email": "hello@pinemoss.test",
+            "amount": "320.00",
+            "currency": "USD",
+            "terms_days": 14,
+        },
+    },
+    {
+        "text": "Invoice Quartz Health, ap@quartz.test, 860.75 USD for a compliance review, net 60 days.",
+        "expect": {
+            "client_name": "Quartz Health",
+            "client_email": "ap@quartz.test",
+            "amount": "860.75",
+            "currency": "USD",
+            "terms_days": 60,
+        },
+    },
 ]
 
 
@@ -166,6 +196,12 @@ def run_reminder_eval(settings: Settings) -> bool:
         (-10, "LOW", "friendly"),
         (-20, "LOW", "firm"),
         (2, "HIGH", "firm"),
+        (0, "MEDIUM", "friendly"),
+        (-14, "HIGH", "firm"),
+        (-15, "LOW", "firm"),
+        (5, "MEDIUM", "friendly"),
+        (-1, "HIGH", "firm"),
+        (-30, "HIGH", "firm"),
     ]
     passed = 0
     for index, (due_days, risk, expected_tone) in enumerate(cases):

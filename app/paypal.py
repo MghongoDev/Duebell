@@ -15,6 +15,7 @@ from uuid import uuid4
 import httpx
 
 from app.config import Settings
+from app.retry import RetryableFailure, call_with_retries
 
 
 class PayPalError(RuntimeError):
@@ -108,12 +109,18 @@ class MockPayPal:
 class SandboxPayPal:
     """PayPal Invoicing v2 over REST. It caches the access token."""
 
-    def __init__(self, settings: Settings, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        client: httpx.Client | None = None,
+        retry_delay: float = 0.5,
+    ) -> None:
         self.settings = settings
         self.client = client or httpx.Client(
             base_url=settings.paypal_base_url,
             timeout=settings.paypal_timeout_seconds,
         )
+        self.retry_delay = retry_delay
         self._token: str | None = None
         self._token_expiry = 0.0
 
@@ -122,11 +129,20 @@ class SandboxPayPal:
             raise PayPalError("PayPal credentials are missing.")
         if self._token and time.time() < self._token_expiry - 60:
             return self._token
-        response = self.client.post(
-            "/v1/oauth2/token",
-            auth=(self.settings.paypal_client_id, self.settings.paypal_client_secret),
-            data={"grant_type": "client_credentials"},
-        )
+        def fetch_token() -> httpx.Response:
+            response = self.client.post(
+                "/v1/oauth2/token",
+                auth=(self.settings.paypal_client_id, self.settings.paypal_client_secret),
+                data={"grant_type": "client_credentials"},
+            )
+            if response.status_code == 429 or response.status_code >= 500:
+                raise RetryableFailure(f"PayPal token request returned {response.status_code}")
+            return response
+
+        try:
+            response = call_with_retries(fetch_token, base_delay=self.retry_delay)
+        except (httpx.HTTPError, RetryableFailure) as exc:
+            raise PayPalError(f"PayPal token request failed: {exc}") from exc
         if response.status_code >= 400:
             raise PayPalError(f"PayPal token request failed: {response.text[:200]}")
         data = response.json()
@@ -138,7 +154,16 @@ class SandboxPayPal:
         return {"Authorization": f"Bearer {self._access_token()}", "Content-Type": "application/json"}
 
     def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
-        response = self.client.request(method, url, headers=self._headers(), **kwargs)
+        def send() -> httpx.Response:
+            response = self.client.request(method, url, headers=self._headers(), **kwargs)
+            if response.status_code == 429 or response.status_code >= 500:
+                raise RetryableFailure(f"PayPal returned {response.status_code}")
+            return response
+
+        try:
+            response = call_with_retries(send, base_delay=self.retry_delay)
+        except (httpx.HTTPError, RetryableFailure) as exc:
+            raise PayPalError(f"PayPal could not be reached after retries: {exc}") from exc
         if response.status_code >= 400:
             raise PayPalError(f"PayPal rejected the call: {response.text[:300]}")
         return response

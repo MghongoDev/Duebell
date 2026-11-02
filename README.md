@@ -35,13 +35,13 @@ Open http://127.0.0.1:8000.
 
 The seed script creates six clients with different payment habits, so the risk levels and reminder tones have something to work with.
 
-Step 2 needs `LLM_MODE=live` and a model endpoint. Without it, fill the form by hand. The rest of the flow is unchanged.
+Step 2 works out of the box for the canonical sentence through the narrow mock parser. For free-form text, set `LLM_MODE=live` and a model endpoint. The manual form always works.
 
 ## Modes
 
 - `PAYPAL_MODE=mock` uses an in-memory PayPal adapter.
 - `PAYPAL_MODE=sandbox` calls the PayPal sandbox REST API.
-- `LLM_MODE=mock` disables AI parsing. The manual form and the reminder draft writer still work.
+- `LLM_MODE=mock` uses a narrow parser for the demo sentence and refuses anything else. The manual form and the reminder draft writer still work.
 - `LLM_MODE=live` calls an Anthropic-compatible endpoint.
 
 ## Evals
@@ -52,6 +52,22 @@ The reminder and webhook evals run offline. The parse eval needs a live model.
 .venv/bin/python scripts/evals.py
 LLM_MODE=live .venv/bin/python scripts/evals.py
 ```
+
+Latest live run on 3 November 2026: parse 10 of 10 cases exact with 50 of 50 fields correct, reminders 10 of 10, webhook pass. Overall pass.
+
+## Resilience
+
+PayPal and model calls retry timeouts, transport errors, HTTP 429, and HTTP 5xx up to three times with exponential backoff. A final failure returns a clear error instead of leaving the UI spinning. Buttons show a working state, and failures appear in a banner.
+
+The smoke script runs three clean reset-to-demo cycles. Each cycle reseeds six clients and 26 invoices, scans for reminders, and confirms that every draft is pending and nothing was sent.
+
+```bash
+.venv/bin/python scripts/smoke.py
+```
+
+## Deploy
+
+`render.yaml` describes a small Render web service. It runs in mock mode, so the public demo needs no PayPal or model credentials. SQLite is ephemeral on the free plan; the demo reseeds on each deploy. Because the app has no login, treat a hosted instance as a demo only.
 
 ## Security and limits
 

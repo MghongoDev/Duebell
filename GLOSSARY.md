@@ -56,6 +56,14 @@ _Avoid_: Batch, job, run
 A human decision that lets a drafted reminder leave the app. It is the only path to a PayPal send.
 _Avoid_: Confirmation, sign-off
 
+**Editing**:
+A human change to the text of a pending reminder. The edited text is what PayPal sends after approval.
+_Avoid_: Rewrite, tweak
+
+**Rejection**:
+A human decision to drop a drafted reminder without sending it. A rejected draft can be drafted again on a later scan.
+_Avoid_: Dismissal, deletion
+
 **Event**:
 A message from PayPal about an invoice, such as sent, paid, cancelled, or refunded. Duebell stores each event once by its PayPal event ID.
 _Avoid_: Notification, callback
@@ -69,7 +77,7 @@ The boundary that talks to PayPal. A mock gateway and a sandbox gateway implemen
 _Avoid_: Client, adapter, connector
 
 **Mock mode**:
-A runtime mode that uses an in-memory PayPal adapter and disables AI parsing, so the app runs with no credentials. The manual form still works.
+A runtime mode that uses an in-memory PayPal adapter and a narrow demo parser, so the app runs with no credentials. The manual form still works.
 _Avoid_: Demo mode, fake mode
 
 **Live mode**:

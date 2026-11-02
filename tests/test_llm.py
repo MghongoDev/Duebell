@@ -48,10 +48,24 @@ def test_extract_json_strips_markdown_fences():
     assert extract_json('```json\n{"amount": "10.00"}\n```') == {"amount": "10.00"}
 
 
-def test_mock_mode_refuses_to_fabricate():
+def test_mock_mode_parses_the_demo_sentence():
     parser = build_parser(Settings(llm_mode="mock"))
-    with pytest.raises(LLMError, match="AI parsing is off"):
-        parser("Invoice Acme 100 USD")
+    proposal = parser("Invoice Acme Studio, billing@acme.test, 1200 USD for logo design, net 14 days.")
+    assert proposal.client_name == "Acme Studio"
+    assert proposal.amount == Decimal("1200.00")
+    assert proposal.terms_days == 14
+
+
+def test_mock_mode_refuses_anything_else():
+    parser = build_parser(Settings(llm_mode="mock"))
+    with pytest.raises(LLMError, match="Mock parsing understands"):
+        parser("Bill Acme later")
+
+
+def test_mock_mode_still_applies_the_validation_rules():
+    parser = build_parser(Settings(llm_mode="mock"))
+    with pytest.raises(LLMError, match="between"):
+        parser("Invoice Acme Studio, billing@acme.test, 1200 USD for logo design, net 999 days.")
 
 
 def test_parse_route_uses_injected_parser(client):

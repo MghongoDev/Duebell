@@ -11,13 +11,14 @@ Duebell is one FastAPI process with a SQLite file. The browser gets server-rende
 | `app/validation.py` | `InvoiceProposal` and the rules shared by the form and the AI parser. |
 | `app/services.py` | Invoice creation, dashboard rows, status changes, webhooks. |
 | `app/risk.py` | Rule baseline for late-payment risk, with reasons. |
-| `app/reminders.py` | Draft text, eligibility, approval, dismissal. |
-| `app/llm.py` | Anthropic-compatible call, JSON extraction, field allowlist. |
+| `app/reminders.py` | Draft text, eligibility, editing, approval, rejection. |
+| `app/llm.py` | Anthropic-compatible call, JSON extraction, field allowlist, demo parser. |
 | `app/paypal.py` | Mock and sandbox gateways. |
+| `app/retry.py` | Bounded retry with backoff for outbound calls. |
 | `app/jobs.py` | APScheduler job that drafts reminders. |
 | `app/web.py` | Routes, templates, security headers, app wiring. |
 | `app/templates/` | Server-rendered pages and the AG Grid setup. |
-| `scripts/` | Seed data, risk comparison, evals, webhook registration. |
+| `scripts/` | Seed data, smoke runs, risk comparison, evals, webhook registration. |
 
 ## Create an invoice
 
@@ -35,11 +36,15 @@ The AI parser and the manual form share the validation and creation path. That i
 
 ## Reminders
 
-`draft_reminders` looks for invoices that are `SENT` and either overdue or due soon with medium or high risk. It skips invoices that already have a pending or sent reminder. It writes `PENDING` drafts with text built only from the invoice and client facts. A human approves a draft, and only then does `send_reminder` call PayPal. The scheduler runs the same draft pass every 30 minutes. See ADR 0003.
+`draft_reminders` looks for invoices that are `SENT` and either overdue or due soon with medium or high risk. It skips invoices that already have a pending or sent reminder. It writes `PENDING` drafts with text built only from the invoice and client facts. A human can edit or reject a draft. Only an approval calls `send_reminder`, and the edited text is what PayPal receives. The scheduler runs the same draft pass every 30 minutes. See ADR 0003.
 
 ## Payment sync
 
 PayPal posts to `/webhooks/paypal`. The gateway verifies the signature through PayPal. `handle_webhook` stores the event by its PayPal id, so a replay is a no-op. A paid event marks the invoice paid and sets `paid_at`. A refresh action reads the current status from PayPal for cases where a webhook does not arrive. The mock gateway offers a simulate-payment action for the offline demo. See ADR 0005.
+
+## Outbound calls
+
+`app/retry.py` retries timeouts, transport errors, HTTP 429, and HTTP 5xx up to three times with exponential backoff. The sandbox gateway and the live parser use it. Exhausted retries become a `PayPalError` or an `LLMError` that the route renders as a readable message.
 
 ## Trust boundaries
 
@@ -53,14 +58,14 @@ PayPal posts to `/webhooks/paypal`. The gateway verifies the signature through P
 
 | Mode | PayPal | AI parsing |
 | --- | --- | --- |
-| Default | In-memory mock | Off; manual form works |
+| Default | In-memory mock | Narrow demo parser; manual form works |
 | `PAYPAL_MODE=sandbox` | PayPal sandbox REST | Off |
 | `LLM_MODE=live` | In-memory mock | Anthropic-compatible endpoint |
 | Both | PayPal sandbox REST | Anthropic-compatible endpoint |
 
 ## Tests and evals
 
-`pytest` covers validation, invoice creation, the PayPal gateway boundary, payment sync, risk, AI guardrails, reminders, and security limits. `scripts/evals.py` checks parse accuracy against a live model, reminder text against fixed facts, and webhook replay. The parse eval is skipped when the model is off.
+`pytest` covers validation, invoice creation, the PayPal gateway boundary, retries, payment sync, risk, AI guardrails, reminders, and security limits. `scripts/evals.py` checks parse accuracy against a live model, reminder text against fixed facts, and webhook replay. The parse eval is skipped when the model is off. `scripts/smoke.py` runs three clean reset-to-demo cycles.
 
 ## Deliberate limits
 

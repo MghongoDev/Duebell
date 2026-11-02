@@ -3,17 +3,20 @@
 The model is treated as an untrusted form filler. Its answer must be JSON with
 only known keys, and the result still passes through the same validation as the
 manual form. Prompt injection in the description is data, never instructions.
-See ADR 0004.
+Mock mode uses a narrow parser for the canonical demo sentence and refuses
+everything else. See ADR 0004.
 """
 
 from __future__ import annotations
 
 import json
+import re
 
 import httpx
 from pydantic import ValidationError
 
 from app.config import Settings
+from app.retry import RetryableFailure, call_with_retries
 from app.validation import InvoiceProposal, validate_proposal
 
 ALLOWED_FIELDS = {
@@ -36,6 +39,14 @@ Rules:
 """
 
 DEFAULT_BASE_URL = "https://api.anthropic.com"
+
+MOCK_PATTERN = re.compile(
+    r"^\s*Invoice\s+(?P<client_name>.+?),\s*"
+    r"(?P<client_email>[^@\s]+@[^@\s]+\.[^@\s]+),\s*"
+    r"(?P<amount>\d[\d,]*(?:\.\d{1,2})?)\s*(?P<currency>[A-Za-z]{3})\s+"
+    r"for\s+(?P<description>.+?),\s*net\s+(?P<terms_days>\d+)\s*days?\.?\s*$",
+    re.IGNORECASE,
+)
 
 
 class LLMError(Exception):
@@ -98,11 +109,19 @@ def _call_model(text: str, settings: Settings) -> dict:
         "system": SYSTEM_PROMPT,
         "messages": [{"role": "user", "content": text}],
     }
-    try:
+    def send() -> httpx.Response:
         with httpx.Client(timeout=settings.llm_timeout_seconds) as client:
-            response = client.post(_messages_url(settings.anthropic_base_url), headers=headers, json=body)
-    except httpx.HTTPError as exc:
-        raise LLMError("Could not reach the AI service. Fill the form instead.") from exc
+            response = client.post(
+                _messages_url(settings.anthropic_base_url), headers=headers, json=body
+            )
+        if response.status_code == 429 or response.status_code >= 500:
+            raise RetryableFailure(f"AI service returned {response.status_code}")
+        return response
+
+    try:
+        response = call_with_retries(send)
+    except (httpx.HTTPError, RetryableFailure) as exc:
+        raise LLMError("Could not reach the AI service after retries. Fill the form instead.") from exc
 
     if response.status_code >= 400:
         raise LLMError(f"The AI service returned {response.status_code}. Fill the form instead.")
@@ -115,14 +134,29 @@ def _call_model(text: str, settings: Settings) -> dict:
             if isinstance(block, dict) and block.get("type") == "text"
         )
     else:
-        text_out = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        choices = data.get("choices") or [{}]
+        text_out = choices[0].get("message", {}).get("content", "")
     return extract_json(text_out)
+
+
+def _mock_parse(text: str, settings: Settings) -> InvoiceProposal:
+    match = MOCK_PATTERN.match(text.strip())
+    if not match:
+        raise LLMError(
+            "Mock parsing understands: 'Invoice Name, email, 1200 USD for work, net 14 days.' "
+            "Fill the form or set LLM_MODE=live."
+        )
+    payload = match.groupdict()
+    payload["amount"] = payload["amount"].replace(",", "")
+    payload["currency"] = payload["currency"].upper()
+    payload["terms_days"] = int(payload["terms_days"])
+    return validate_payload(payload, settings)
 
 
 def build_parser(settings: Settings):
     def parse(text: str) -> InvoiceProposal:
         if settings.llm_mode != "live":
-            raise LLMError("AI parsing is off. Fill the form, or set LLM_MODE=live.")
+            return _mock_parse(text, settings)
         return validate_payload(_call_model(text, settings), settings)
 
     return parse

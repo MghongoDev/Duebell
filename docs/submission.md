@@ -30,9 +30,16 @@ A freelancer finishes the work, sends the invoice, and then has to remember to c
 - The prompt treats the user text as data, not instructions. A test checks that injected text stays in a field.
 - The risk score is an explainable rule baseline, not an opaque model. A separate script trains logistic regression on synthetic data and reports the comparison beside the baseline. The app does not claim the synthetic result proves real-world accuracy.
 
+## Evidence
+
+- `pytest`: 66 tests pass.
+- Live evals on 3 November 2026: parse 10 of 10 cases exact with 50 of 50 fields correct, reminders 10 of 10, webhook pass.
+- `scripts/smoke.py`: three clean reset-to-demo cycles, each with six clients, 26 invoices, two pending drafts, and zero sends.
+- The dashboard screenshot in the README comes from the seeded mock mode.
+
 ## Built with
 
-Python 3.14, FastAPI, Jinja2, HTMX, AG Grid Community, SQLModel, SQLite, APScheduler, httpx, scikit-learn for the side comparison, and pytest.
+Python 3.12+, FastAPI, Jinja2, HTMX, AG Grid Community, SQLModel, SQLite, APScheduler, httpx, scikit-learn for the side comparison, and pytest.
 
 ## Challenges
 
@@ -43,7 +50,7 @@ Python 3.14, FastAPI, Jinja2, HTMX, AG Grid Community, SQLModel, SQLite, APSched
 ## What is next
 
 - Calibrate risk on real, consented payment history.
-- Let the user edit a draft before approval and learn from the edits.
+- Learn from operator edits to improve the draft tone.
 - Add partial payments and multi-currency support.
 - Add authentication before anyone hosts this beyond a local demo.
 
