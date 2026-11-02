@@ -186,13 +186,13 @@ const actionsCell = (params) => {
 const gridState = { status: "", risk: "" };
 const gridOptions = {
   columnDefs: [
-    { headerName: "Invoice", field: "invoice_number", cellRenderer: invoiceCell, flex: 2, minWidth: 220 },
-    { headerName: "Client", field: "client_name", cellRenderer: clientCell, flex: 2, minWidth: 200 },
-    { headerName: "Amount", field: "amount_cents", cellRenderer: amountCell, width: 150, type: "rightAligned" },
-    { headerName: "Due", field: "due_display", width: 130, cellClassRules: { "overdue-cell": (params) => params.data.overdue } },
-    { headerName: "Status", field: "status", cellRenderer: statusCell, width: 120 },
-    { headerName: "Risk", field: "risk_level", cellRenderer: riskCell, flex: 2, minWidth: 260 },
-    { headerName: "", field: "id", cellRenderer: actionsCell, width: 240, sortable: false, filter: false },
+    { headerName: "Invoice", field: "invoice_number", cellRenderer: invoiceCell, flex: 2, minWidth: 190 },
+    { headerName: "Client", field: "client_name", cellRenderer: clientCell, flex: 1, minWidth: 160 },
+    { headerName: "Amount", field: "amount_cents", cellRenderer: amountCell, width: 125, type: "rightAligned" },
+    { headerName: "Due", field: "due_display", width: 125, cellClassRules: { "overdue-cell": (params) => params.data.overdue } },
+    { headerName: "Status", field: "status", cellRenderer: statusCell, width: 100 },
+    { headerName: "Risk", field: "risk_level", cellRenderer: riskCell, flex: 2, minWidth: 220 },
+    { headerName: "", field: "id", cellRenderer: actionsCell, width: 210, sortable: false, filter: false },
   ],
   rowData: invoiceRows,
   defaultColDef: { sortable: true, resizable: true, filter: true },

@@ -6,6 +6,8 @@ It is an invoice-to-cash agent for freelancers and small businesses. You describ
 
 This repository is a hackathon entry for the PayPal AI Hackathon. It runs in mock mode by default, so it works with no credentials.
 
+![Duebell dashboard](docs/dashboard.png)
+
 ## Status
 
 Hackathon entry for the PayPal AI Hackathon, November 2026. The full flow runs in mock mode. The sandbox adapter is wired but needs your PayPal app to have the Invoicing scope.
