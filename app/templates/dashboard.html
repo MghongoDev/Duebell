@@ -90,7 +90,7 @@
     <li class="reminder">
       <div class="reminder-head">
         <strong>{{ reminder.invoice_number }} · {{ reminder.client_name }}</strong>
-        <span class="status status-{{ reminder.status|lower }}">{{ reminder.status }}</span>
+        <span class="status reminder-status-{{ reminder.status|lower }}">{{ reminder.status }}</span>
       </div>
       <pre class="draft">{{ reminder.draft_text }}</pre>
       {% if reminder.status == 'PENDING' %}
@@ -113,62 +113,25 @@
     <p>Status, risk, and the reason behind each score.</p>
   </div>
 
-  {% if rows %}
-  <div class="table-wrap">
-    <table class="invoice-table">
-      <thead>
-        <tr>
-          <th>Invoice</th>
-          <th>Client</th>
-          <th>Amount</th>
-          <th>Due</th>
-          <th>Status</th>
-          <th>Risk</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in rows %}
-        <tr class="{% if row.overdue %}is-overdue{% endif %}">
-          <td>
-            <strong>{{ row.invoice_number }}</strong>
-            <span class="muted">{{ row.description }}</span>
-          </td>
-          <td>
-            <span>{{ row.client_name }}</span>
-            <span class="muted">{{ row.client_email }}</span>
-          </td>
-          <td class="amount">{{ row.amount_display }} {{ row.currency }}</td>
-          <td>{{ row.due_display }}</td>
-          <td><span class="status status-{{ row.status|lower }}">{{ row.status }}</span></td>
-          <td>
-            {% if row.risk_level %}
-            <span class="risk risk-{{ row.risk_level|lower }}">{{ row.risk_level }}</span>
-            <ul class="reasons">
-              {% for reason in row.risk_reasons %}
-              <li>{{ reason }}</li>
-              {% endfor %}
-            </ul>
-            {% else %}
-            <span class="muted">Not scored</span>
-            {% endif %}
-          </td>
-          <td class="row-actions">
-            <button class="ghost small" data-action="refresh" data-id="{{ row.id }}">Refresh</button>
-            {% if row.status not in ['PAID', 'CANCELLED', 'REFUNDED'] %}
-            <button class="ghost small" data-action="pay" data-id="{{ row.id }}">Simulate payment</button>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <div class="grid-tools">
+    <input id="grid-search" type="search" placeholder="Search invoices or clients" aria-label="Search invoices">
+    <select id="grid-status" aria-label="Filter by status">
+      <option value="">All statuses</option>
+      <option value="SENT">Sent</option>
+      <option value="PAID">Paid</option>
+      <option value="DRAFT">Draft</option>
+      <option value="CANCELLED">Cancelled</option>
+      <option value="REFUNDED">Refunded</option>
+    </select>
+    <select id="grid-risk" aria-label="Filter by risk">
+      <option value="">All risk levels</option>
+      <option value="HIGH">High</option>
+      <option value="MEDIUM">Medium</option>
+      <option value="LOW">Low</option>
+    </select>
   </div>
-  {% else %}
-  <div class="empty">
-    <p>No invoices yet. Create the first one above.</p>
-  </div>
-  {% endif %}
+  <div id="invoice-grid" class="ag-theme-quartz invoice-grid" role="table" aria-label="Invoices"></div>
+  <script id="invoice-data" type="application/json">{{ rows | tojson }}</script>
 </section>
 
 <section class="panel">
@@ -192,6 +155,74 @@
 </section>
 
 <script>
+const invoiceRows = JSON.parse(document.getElementById("invoice-data").textContent);
+const gridElement = document.getElementById("invoice-grid");
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[char]));
+}
+
+const invoiceCell = (params) =>
+  `<strong>${escapeHtml(params.data.invoice_number)}</strong><span class="muted">${escapeHtml(params.data.description)}</span>`;
+const clientCell = (params) =>
+  `<span>${escapeHtml(params.data.client_name)}</span><span class="muted">${escapeHtml(params.data.client_email)}</span>`;
+const amountCell = (params) =>
+  `<span class="amount">${escapeHtml(params.data.amount_display)} ${escapeHtml(params.data.currency)}</span>`;
+const statusCell = (params) =>
+  `<span class="status status-${params.value.toLowerCase()}">${escapeHtml(params.value)}</span>`;
+const riskCell = (params) => {
+  if (!params.value) return '<span class="muted">Not scored</span>';
+  const reasons = (params.data.risk_reasons || []).map((reason) => `<li>${escapeHtml(reason)}</li>`).join("");
+  return `<span class="risk risk-${params.value.toLowerCase()}">${escapeHtml(params.value)}</span><ul class="reasons">${reasons}</ul>`;
+};
+const actionsCell = (params) => {
+  const closed = ["PAID", "CANCELLED", "REFUNDED"].includes(params.data.status);
+  const pay = closed ? "" : ` <button class="ghost small" data-action="pay" data-id="${params.data.id}">Simulate payment</button>`;
+  return `<button class="ghost small" data-action="refresh" data-id="${params.data.id}">Refresh</button>${pay}`;
+};
+
+const gridState = { status: "", risk: "" };
+const gridOptions = {
+  columnDefs: [
+    { headerName: "Invoice", field: "invoice_number", cellRenderer: invoiceCell, flex: 2, minWidth: 220 },
+    { headerName: "Client", field: "client_name", cellRenderer: clientCell, flex: 2, minWidth: 200 },
+    { headerName: "Amount", field: "amount_cents", cellRenderer: amountCell, width: 150, type: "rightAligned" },
+    { headerName: "Due", field: "due_display", width: 130, cellClassRules: { "overdue-cell": (params) => params.data.overdue } },
+    { headerName: "Status", field: "status", cellRenderer: statusCell, width: 120 },
+    { headerName: "Risk", field: "risk_level", cellRenderer: riskCell, flex: 2, minWidth: 260 },
+    { headerName: "", field: "id", cellRenderer: actionsCell, width: 240, sortable: false, filter: false },
+  ],
+  rowData: invoiceRows,
+  defaultColDef: { sortable: true, resizable: true, filter: true },
+  rowHeight: 88,
+  headerHeight: 42,
+  rowClassRules: { "is-overdue": (params) => params.data.overdue },
+  isExternalFilterPresent: () => gridState.status !== "" || gridState.risk !== "",
+  doesExternalFilterPass: (node) =>
+    (!gridState.status || node.data.status === gridState.status) &&
+    (!gridState.risk || node.data.risk_level === gridState.risk),
+  localeText: { noRowsToShow: "No invoices yet. Create the first one above." },
+};
+
+if (window.agGrid && gridElement) {
+  const gridApi = agGrid.createGrid(gridElement, gridOptions);
+  document.getElementById("grid-search").addEventListener("input", (event) => {
+    gridApi.setGridOption("quickFilterText", event.target.value);
+  });
+  document.getElementById("grid-status").addEventListener("change", (event) => {
+    gridState.status = event.target.value;
+    gridApi.onFilterChanged();
+  });
+  document.getElementById("grid-risk").addEventListener("change", (event) => {
+    gridState.risk = event.target.value;
+    gridApi.onFilterChanged();
+  });
+} else if (gridElement) {
+  gridElement.innerHTML = '<div class="empty"><p>Could not load the invoice grid. Refresh the page.</p></div>';
+}
+
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-action]");
   if (!button) return;

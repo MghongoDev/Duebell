@@ -71,3 +71,12 @@ def test_amount_above_cap_is_rejected(client):
     response = client.post("/invoices", data=data)
     assert response.status_code == 422
     assert "at most" in response.text
+
+
+def test_dashboard_includes_grid_and_ai_panels(client):
+    client.post("/invoices", data=FORM, follow_redirects=False)
+    page = client.get("/")
+    assert page.status_code == 200
+    assert 'id="invoice-data"' in page.text
+    assert "ag-theme-quartz" in page.text
+    assert 'id="ai-fill"' in page.text
