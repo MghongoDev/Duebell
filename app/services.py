@@ -157,6 +157,10 @@ def invoice_rows(session: Session) -> list[dict]:
                 "risk_score": invoice.risk_score,
                 "risk_level": invoice.risk_level,
                 "risk_reasons": [line for line in invoice.risk_reasons.splitlines() if line.strip()],
+                "limited_data": any(
+                    "New client" in r or "Limited history" in r
+                    for r in (invoice.risk_reasons or "").splitlines()
+                ),
                 "paypal_invoice_id": invoice.paypal_invoice_id,
             }
         )
@@ -164,8 +168,13 @@ def invoice_rows(session: Session) -> list[dict]:
 
 
 def dashboard_totals(rows: list[dict]) -> dict:
-    open_statuses = {"DRAFT", "SENT", "OVERDUE"}
-    outstanding = sum(row["amount_cents"] for row in rows if row["status"] in open_statuses)
+    # Outstanding money owed = invoices that have left draft and are not yet
+    # settled. A DRAFT has never been sent, so it is not a debt to collect.
+    outstanding = sum(
+        row["amount_cents"]
+        for row in rows
+        if row["status"] == "SENT" and row.get("paypal_invoice_id")
+    )
     overdue = sum(1 for row in rows if row["overdue"])
     paid = sum(row["amount_cents"] for row in rows if row["status"] == "PAID")
     return {

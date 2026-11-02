@@ -157,6 +157,11 @@ def build_parser(settings: Settings):
     def parse(text: str) -> InvoiceProposal:
         if settings.llm_mode != "live":
             return _mock_parse(text, settings)
+        # Live mode needs an Anthropic endpoint to reach. If the operator set
+        # LLM_MODE=live but left the key/base-url/token empty, fall back to the
+        # deterministic mock instead of hitting the network and returning 401.
+        if not (settings.anthropic_api_key or settings.anthropic_auth_token or settings.anthropic_base_url):
+            return _mock_parse(text, settings)
         return validate_payload(_call_model(text, settings), settings)
 
     return parse

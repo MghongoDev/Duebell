@@ -181,7 +181,10 @@ const statusCell = (params) =>
 const riskCell = (params) => {
   if (!params.value) return '<span class="muted">Not scored</span>';
   const reasons = (params.data.risk_reasons || []).map((reason) => `<li>${escapeHtml(reason)}</li>`).join("");
-  return `<span class="risk risk-${params.value.toLowerCase()}">${escapeHtml(params.value)}</span><ul class="reasons">${reasons}</ul>`;
+  const ld = params.data.limited_data
+    ? `<li class="limited">Limited data: no history yet</li>`
+    : "";
+  return `<span class="risk risk-${params.value.toLowerCase()}">${escapeHtml(params.value)}</span><ul class="reasons">${reasons}${ld}</ul>`;
 };
 const actionsCell = (params) => {
   const closed = ["PAID", "CANCELLED", "REFUNDED"].includes(params.data.status);
