@@ -36,7 +36,7 @@ Python 3.14, FastAPI, Jinja2, HTMX, AG Grid Community, SQLModel, SQLite, APSched
 
 ## Challenges
 
-- PayPal sandbox Invoicing calls returned `403 NOT_AUTHORIZED` during development even after the Invoicing feature was enabled. The mock gateway keeps the demo reproducible, and the sandbox adapter is wired and tested at the boundary.
+- PayPal sandbox Invoicing calls returned `403 NOT_AUTHORIZED` during development even after the Invoicing feature was enabled. The mock gateway keeps the demo reproducible. The sandbox adapter is wired, and its request payloads are tested without a network call.
 - The model can return a plausible wrong value. The fix was to make the model a form filler, not an agent, and to keep the manual form as the fallback.
 - Reminder tone is a judgement call. The app uses a small, visible rule and shows the whole draft before approval.
 

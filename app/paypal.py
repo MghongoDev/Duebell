@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Mapping, Protocol
 from uuid import uuid4
 
@@ -19,6 +19,23 @@ from app.config import Settings
 
 class PayPalError(RuntimeError):
     pass
+
+
+def term_type(days: int) -> str:
+    """Map local net terms to the values PayPal Invoicing accepts."""
+    if days <= 0:
+        return "DUE_ON_RECEIPT"
+    if days <= 10:
+        return "NET_10"
+    if days <= 15:
+        return "NET_15"
+    if days <= 30:
+        return "NET_30"
+    if days <= 45:
+        return "NET_45"
+    if days <= 60:
+        return "NET_60"
+    return "NET_90"
 
 
 class PayPalGateway(Protocol):
@@ -144,7 +161,7 @@ class SandboxPayPal:
             "invoice_date": issued_at.date().isoformat(),
             "currency_code": currency,
             "note": description,
-            "payment_term": {"term_type": f"NET_{terms_days}"},
+            "payment_term": {"term_type": term_type(terms_days)},
         }
         invoicer: dict = {"business_name": "Duebell"}
         if self.settings.paypal_invoicer_email:
@@ -194,7 +211,7 @@ class SandboxPayPal:
             json={
                 "method": "BANK_TRANSFER",
                 "amount": {"currency_code": currency, "value": f"{amount_cents / 100:.2f}"},
-                "date": datetime.utcnow().date().isoformat(),
+                "date": datetime.now(timezone.utc).date().isoformat(),
             },
         )
 

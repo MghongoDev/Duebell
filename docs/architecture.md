@@ -27,7 +27,7 @@ Duebell is one FastAPI process with a SQLite file. The browser gets server-rende
 4. The gateway creates the PayPal invoice, then sends it. The invoice becomes `SENT`.
 5. The dashboard reads the invoice rows and totals.
 
-The AI parser and the manual form share step 3. That is the guardrail from ADR 0004.
+The AI parser and the manual form share the validation and creation path. That is the guardrail from ADR 0004.
 
 ## Risk
 
