@@ -22,3 +22,7 @@ Define `PayPalGateway` as a Python `Protocol` in `app/paypal.py`. `MockPayPal` k
 - Tests assert against `MockPayPal.sent_reminders` and invoice state.
 - The sandbox adapter is the only file that knows PayPal paths and payloads.
 - A sandbox-only bug can still hide from the test suite. The live checkpoint covers that gap.
+
+## Revision, 2026-11-05
+
+Issue #29. The sandbox gateway retries failed calls, so a retry could repeat an action PayPal had already taken. Every write now carries a `PayPal-Request-Id` header, one per action, kept the same across that action's retries. PayPal documents the header only for creating invoices. Duebell sends it on send, remind and payment calls too, because PayPal's general guidance says to send it on every POST and it costs nothing where it is ignored. The live sandbox check in #32 settles which endpoints honour it.

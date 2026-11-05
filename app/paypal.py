@@ -1,4 +1,4 @@
-"""PayPal gateway for Duebell (issues #10, #11, #21).
+"""PayPal gateway for Duebell (issues #10, #11, #21, #29).
 
 The app talks to one protocol. The mock gateway keeps the demo offline, the
 sandbox gateway calls PayPal's Invoicing v2 REST API, and the toolkit gateway
@@ -165,8 +165,16 @@ class SandboxPayPal:
         return {"Authorization": f"Bearer {self._access_token()}", "Content-Type": "application/json"}
 
     def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        # One ID per action, chosen before the retry loop, so PayPal can treat
+        # a retry as the same request (issue #29). PayPal documents this for
+        # creating invoices; send, remind and payments do not document it.
+        request_id = str(uuid4()) if method in {"POST", "PUT"} else None
+
         def send() -> httpx.Response:
-            response = self.client.request(method, url, headers=self._headers(), **kwargs)
+            headers = self._headers()
+            if request_id:
+                headers["PayPal-Request-Id"] = request_id
+            response = self.client.request(method, url, headers=headers, **kwargs)
             if response.status_code == 429 or response.status_code >= 500:
                 raise RetryableFailure(f"PayPal returned {response.status_code}")
             return response

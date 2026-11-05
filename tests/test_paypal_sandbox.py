@@ -114,3 +114,47 @@ def test_create_invoice_retries_a_transport_error():
 def test_webhook_check_refuses_without_a_webhook_id():
     gateway = SandboxPayPal(settings(paypal_webhook_id=""), client=FakeClient())
     assert gateway.verify_webhook({}, "{}") is False
+
+
+class RecordingFlakyClient(FakeClient):
+    """Fails the first `failures` requests with a 503, recording every attempt's headers."""
+
+    def __init__(self, failures=0):
+        super().__init__()
+        self.failures = failures
+        self.attempts = []
+
+    def request(self, method, url, **kwargs):
+        self.attempts.append((method, url, dict(kwargs.get("headers") or {})))
+        if self.failures:
+            self.failures -= 1
+            return FakeResponse(status_code=503, text="busy")
+        return super().request(method, url, **kwargs)
+
+
+def test_a_retried_reminder_reuses_its_request_id():
+    fake = RecordingFlakyClient(failures=2)
+    gateway = SandboxPayPal(settings(), client=fake, retry_delay=0)
+    gateway.send_reminder("INV-1", "Reminder: invoice DUE-1", "Please pay.")
+    ids = [headers.get("PayPal-Request-Id") for _, url, headers in fake.attempts if url.endswith("/remind")]
+    assert len(ids) == 3
+    assert ids[0] and len(set(ids)) == 1, "every retry of one action must carry the same ID"
+    assert len(ids[0]) <= 38
+
+
+def test_separate_actions_get_separate_request_ids():
+    fake = RecordingFlakyClient()
+    gateway = SandboxPayPal(settings(), client=fake, retry_delay=0)
+    gateway.send_invoice("INV-1")
+    gateway.send_reminder("INV-1", "Reminder", "Please pay.")
+    gateway.send_reminder("INV-1", "Reminder", "Please pay again.")
+    gateway.record_payment("INV-1", 120000, "USD")
+    ids = [headers.get("PayPal-Request-Id") for method, _, headers in fake.attempts if method == "POST"]
+    assert len(ids) == 4 and len(set(ids)) == 4
+
+
+def test_reads_carry_no_request_id():
+    fake = RecordingFlakyClient()
+    gateway = SandboxPayPal(settings(), client=fake, retry_delay=0)
+    gateway.get_invoice("INV-1")
+    assert "PayPal-Request-Id" not in fake.attempts[-1][2]

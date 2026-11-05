@@ -56,7 +56,7 @@ Python 3.12+, FastAPI, Jinja2, HTMX, AG Grid Community, SQLModel, SQLite, APSche
 - Calibrate risk on real, consented payment history.
 - Learn from the user's edits to improve the draft tone.
 - Split the risk comparison's held-out invoices by time rather than at random.
-- Send a PayPal request ID so retried sandbox calls cannot act twice.
+- Confirm against the live sandbox which Invoicing endpoints honour the PayPal request ID.
 - Add password reset and self-service sign-up.
 
 ## Deliberate limits

@@ -33,7 +33,18 @@ Three failures could each lead to a duplicate. Duebell handles each one differen
 
 The third case trades one possible missed reminder for no duplicate. A duplicate reaches the client. A missed one shows up when the user checks PayPal, and they can remind from there. Duebell will not draft another reminder for that invoice, because it counts this one as sent.
 
-One gap remains. The sandbox gateway tries a call up to three times when it times out or PayPal returns a server error, and that includes the call that sends a reminder. If PayPal acted on a request whose answer was lost, the retry repeats it. Many PayPal APIs accept a `PayPal-Request-Id` header that makes a retry safe. Duebell does not send one, and nobody has tested whether the Invoicing endpoints honour it.
+### Retries inside one call
+
+The sandbox gateway tries a call up to three times when it times out or PayPal returns a server error. If PayPal acted on a request whose answer was lost, a plain retry would repeat it. So each write carries a `PayPal-Request-Id` header, chosen once per action and kept for all its retries. PayPal treats a repeated ID as the same request.
+
+How far that protects depends on the endpoint:
+
+| Call | Is the header documented? |
+| --- | --- |
+| Create an invoice | Yes. PayPal's troubleshooting guide says a repeated ID returns the original result instead of a new invoice. |
+| Send an invoice, send a reminder, record a payment | No. Duebell sends the header anyway, as PayPal's general guidance advises for every POST. Whether these endpoints honour it is unchecked. |
+
+Toolkit calls carry no request ID, because the toolkit builds its own requests. They do not retry either, so the timeout rule above covers them. A live sandbox check (#32) will confirm which endpoints honour the header.
 
 ## Schedules
 
