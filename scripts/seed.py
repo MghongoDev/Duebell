@@ -1,4 +1,4 @@
-"""Seed synthetic clients and invoices for the Duebell demo (issues #13, #24).
+"""Seed synthetic clients and invoices for the Duebell demo (issues #13, #24; ADR 0008).
 
 The seed belongs to a demo user. --if-empty seeds only a database with no
 users, and --require-password refuses the published default password, which

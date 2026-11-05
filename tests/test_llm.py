@@ -95,3 +95,15 @@ def test_parse_route_reports_llm_error(client):
 def test_parse_route_needs_text(client):
     response = client.post("/parse", data={"description": "   "})
     assert response.status_code == 422
+
+
+def test_an_empty_setting_in_env_falls_back_to_the_default(monkeypatch):
+    """`.env.example` leaves ANTHROPIC_MODEL blank; a blank must not become the model name."""
+    from app.config import get_settings
+
+    monkeypatch.setenv("ANTHROPIC_MODEL", "")
+    get_settings.cache_clear()
+    try:
+        assert get_settings().anthropic_model == "claude-3-5-haiku-20241022"
+    finally:
+        get_settings.cache_clear()

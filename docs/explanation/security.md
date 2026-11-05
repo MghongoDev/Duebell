@@ -13,7 +13,9 @@ Duebell is a sandbox demo, but it can be hosted for several people. This page ex
 
 ## Ownership
 
-Every client, invoice, reminder, schedule, event and risk comparison belongs to one user. Every query takes a scope with no default: one user's ID, or `EVERY_USER` for the scheduler. Passing nothing raises an error, so a forgotten scope fails loudly instead of showing everyone's data. A request for another user's record gets the same `404` as a missing one.
+Every client, invoice, reminder, schedule, event and risk comparison belongs to one user. Every function that lists records, or fetches one by ID, takes a scope with no default: one user's ID, or `EVERY_USER` for the scheduler. Passing `None` raises an error, so a forgotten scope stops the request instead of showing everyone's data. A request for another user's record gets the same `404` as a missing one.
+
+Creating a record takes its owner explicitly. Only the offline evals create records with no owner. A few helpers, such as a client's history, filter by an ID the caller has already checked, so they take no scope of their own.
 
 A webhook event belongs to the owner of the invoice it touches.
 

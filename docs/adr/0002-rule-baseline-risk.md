@@ -21,3 +21,7 @@ Ship a rule baseline in `app/risk.py`. It combines prior lateness share, average
 - The limited-data label is honest about weak evidence.
 - The logistic-regression comparison is a side artifact, not a product claim.
 - The weights are hand-tuned and need real data before anyone treats them as calibrated.
+
+## Revision, 2026-11-05
+
+Issue #23 added currencies. Amounts now compare only within one currency, while lateness still uses the client's whole history. A client's first invoice in a new currency has no usual amount to compare with, so it carries the limited-data label, with a reason saying so. A score that cannot see part of the evidence should say it is unsure, the same reasoning as for a new client.

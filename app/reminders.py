@@ -283,6 +283,7 @@ def reminder_rows(session: Session, scope: Scope) -> list[dict]:
                 "sent_at": reminder.sent_at.isoformat(timespec="minutes") if reminder.sent_at else None,
                 "sent_at_display": reminder.sent_at.strftime("%d %b %H:%M") if reminder.sent_at else "",
                 "sent_channels": sent_channels(reminder),
+                "paypal_sent": Channel.PAYPAL in sent_channels(reminder),
                 "has_paypal_id": bool(invoice and invoice.paypal_invoice_id),
             }
         )

@@ -71,12 +71,7 @@ You took one invoice through every step Duebell manages: parse, validate, send, 
 
 ## If something goes wrong
 
-| You see | Do this |
-| --- | --- |
-| The sign-in page says the email and password do not match | Run step 2 again. It recreates the demo user. |
-| "Too many failed attempts" | Wait 15 minutes, or restart the app. |
-| **Scan now** drafts nothing | Check the sentence says `net 2 days`. An invoice due later than three days out is outside the reminder window. |
-| "Mock parsing understands..." | Paste the sentence exactly, or fill the form by hand. |
+If you cannot sign in, run step 2 again: it recreates the demo user. If **Scan now** drafts nothing, check the sentence says `net 2 days`. Every other error message is in [Troubleshoot](../how-to/troubleshoot.md).
 
 ## Next
 

@@ -33,7 +33,7 @@ Three failures could each lead to a duplicate. Duebell handles each one differen
 
 The third case trades one possible missed reminder for no duplicate. A duplicate reaches the client. A missed one shows up when the user checks PayPal, and they can remind from there. Duebell will not draft another reminder for that invoice, because it counts this one as sent.
 
-One gap remains. The sandbox gateway retries timeouts and server errors up to three times, including the call that sends a reminder. If PayPal acted on a request whose answer was lost, the retry repeats it. Many PayPal APIs accept a `PayPal-Request-Id` header that makes a retry safe. Duebell does not send one, and nobody has tested whether the Invoicing endpoints honour it.
+One gap remains. The sandbox gateway tries a call up to three times when it times out or PayPal returns a server error, and that includes the call that sends a reminder. If PayPal acted on a request whose answer was lost, the retry repeats it. Many PayPal APIs accept a `PayPal-Request-Id` header that makes a retry safe. Duebell does not send one, and nobody has tested whether the Invoicing endpoints honour it.
 
 ## Schedules
 

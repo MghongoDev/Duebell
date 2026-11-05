@@ -43,13 +43,13 @@ Three variables pick the modes. All default to `mock`.
 | `LLM_MODE` | `mock`, `live` |
 | `EMAIL_MODE` | `mock`, `smtp` |
 
-Every other setting has a working default. [Configuration](docs/reference/configuration.md) lists them all. Before hosting, set `SECRET_KEY`, `COOKIE_SECURE=true` and your own `DEMO_PASSWORD`; see [Security](docs/explanation/security.md).
+Every other setting has a working default. [Configuration](docs/reference/configuration.md) lists them all. If something fails, [Troubleshoot](docs/how-to/troubleshoot.md) lists each error message and its fix. Before hosting, set `SECRET_KEY`, `COOKIE_SECURE=true` and your own `DEMO_PASSWORD`; see [Security](docs/explanation/security.md).
 
 ## Status
 
 A PayPal AI Hackathon entry, November 2026.
 
-- The full flow works in mock mode. Tests and the smoke run check it on every change.
+- The full flow works in mock mode. The tests and the smoke run cover it; run them before each commit, since there is no CI yet.
 - Sandbox and toolkit modes are wired and tested offline. Live sandbox calls returned `403 NOT_AUTHORIZED` for Invoicing during development, so neither has been checked end to end against PayPal.
 - The last live parsing eval, on 3 November 2026, got 10 of 10 cases and 50 of 50 fields right.
 - The risk weights are set by hand. The training data is synthetic.

@@ -144,13 +144,13 @@ def create_invoice(
     invoice.paypal_invoice_id = paypal_id
     session.add(invoice)
     session.commit()
-    return send_draft_invoice(session, invoice, gateway)
+    return send_unsent_invoice(session, invoice, gateway)
 
 
 class InvoiceNotSent(PayPalError):
-    """PayPal holds the invoice as a draft, but sending it failed.
+    """PayPal holds the invoice, but sending it failed.
 
-    The caller keeps `invoice` and retries with send_draft_invoice, so a retry
+    The caller keeps `invoice` and retries with send_unsent_invoice, so a retry
     never creates a second PayPal invoice.
     """
 
@@ -159,10 +159,10 @@ class InvoiceNotSent(PayPalError):
         self.invoice = invoice
 
 
-def send_draft_invoice(session: Session, invoice: Invoice, gateway) -> Invoice:
-    """Send an invoice PayPal already holds. Raises InvoiceNotSent on failure."""
+def send_unsent_invoice(session: Session, invoice: Invoice, gateway: PayPalGateway) -> Invoice:
+    """Send an invoice PayPal holds but has not sent. Raises InvoiceNotSent on failure."""
     if invoice.status != "DRAFT" or not invoice.paypal_invoice_id:
-        raise ValueError("Only a PayPal draft can be sent.")
+        raise ValueError("Only an invoice PayPal holds unsent can be sent this way.")
     try:
         gateway.send_invoice(invoice.paypal_invoice_id)
     except PayPalError as exc:

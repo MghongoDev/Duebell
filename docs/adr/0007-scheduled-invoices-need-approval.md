@@ -29,3 +29,12 @@ The form's first submission is itself the confirmation: a repeating invoice send
 - Nothing on a schedule reaches PayPal without a click.
 - An operator who stops checking the queue stops invoicing. The pending list makes that visible.
 - Paid instalments feed the client's history and the risk refit like any invoice.
+
+## Revision, 2026-11-05
+
+A review found two gaps.
+
+- The form offered instalments only for a High-risk invoice, but the server accepted a split at any risk. The server now scores the invoice first and refuses a split unless it is High. It checks before creating the client, so a refused split leaves nothing behind.
+- A repeat with a fixed number of cycles went DONE as soon as it queued its last invoice, while that invoice still waited for approval. It then dropped off the dashboard and could not be cancelled. A schedule now goes DONE only when it can queue nothing more and none of its invoices is upcoming or pending.
+
+A third fix follows from the approval rule. If PayPal created an invoice but sending it failed, approving again used to create a second invoice. The scheduled invoice now keeps a link to the one PayPal holds, and the retry sends that one.

@@ -1,4 +1,4 @@
-"""Background jobs for Duebell (issues #15, #22, #24, #25).
+"""Background jobs for Duebell (issues #15, #22, #24, #25; ADRs 0002, 0003, 0007, 0008).
 
 The reminder scan only drafts. Sending still needs a human approval
 (ADR 0003). The risk refit only stores a comparison; the rule baseline stays

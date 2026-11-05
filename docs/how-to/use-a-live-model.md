@@ -10,7 +10,7 @@ Mock mode parses only one sentence pattern. To turn any short description into i
    ANTHROPIC_API_KEY=your-key
    ```
 
-   A gateway that uses a bearer token takes `ANTHROPIC_AUTH_TOKEN` instead of the key. `ANTHROPIC_MODEL` picks the model.
+   A proxy that takes a bearer token uses `ANTHROPIC_AUTH_TOKEN` instead of the key. `ANTHROPIC_MODEL` picks the model.
 
 2. Restart the app and use **Fill fields with AI**.
 
@@ -32,4 +32,4 @@ The script runs ten parsing cases against the model and reports each field it go
 | "The AI service returned 401" | The key or token is wrong. |
 | "The AI returned fields duebell does not accept" | The model added keys. Try again, or fill the form by hand. |
 
-Each call costs whatever your model provider charges for one short request. Duebell retries a failed call up to three times.
+Each call costs whatever your model provider charges for one short request. Duebell tries a failed call up to three times in all.

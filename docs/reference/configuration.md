@@ -2,7 +2,7 @@
 
 Duebell reads its settings from environment variables when it starts. It also loads a `.env` file from the working directory. `.env.example` lists every name, and git ignores `.env`.
 
-The defaults run the whole demo with no credentials.
+The defaults run the whole demo with no credentials. A blank value, such as `ANTHROPIC_MODEL=` in `.env.example`, counts as unset, so the default applies.
 
 ## Modes
 

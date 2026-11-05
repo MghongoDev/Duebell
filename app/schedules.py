@@ -19,7 +19,7 @@ from app.config import Settings
 from app.models import Client, Invoice, Schedule, ScheduledInvoice, as_utc, utcnow
 from app.ownership import Scope, owned
 from app.paypal import PayPalGateway
-from app.services import InvoiceNotSent, create_invoice, money, send_draft_invoice
+from app.services import InvoiceNotSent, create_invoice, money, send_unsent_invoice
 from app.validation import FieldError, InvoiceProposal
 
 INTERVAL_UNITS = ("WEEK", "MONTH")
@@ -253,8 +253,8 @@ def approve_scheduled(
         raise ValueError("This scheduled invoice has lost its client.")
     try:
         if item.invoice_id is not None:
-            # An earlier approval created the PayPal draft but could not send it.
-            invoice = send_draft_invoice(session, session.get(Invoice, item.invoice_id), gateway)
+            # An earlier approval created the PayPal invoice but could not send it.
+            invoice = send_unsent_invoice(session, session.get(Invoice, item.invoice_id), gateway)
         else:
             proposal = InvoiceProposal(
                 client_name=client.name,

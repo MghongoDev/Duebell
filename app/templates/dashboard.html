@@ -170,7 +170,7 @@
       </div>
       {% if reminder.status == 'PENDING' %}
       {% if reminder.sent_channels %}
-      <p class="hint">Already sent via {{ reminder.sent_channels|join(' and ')|replace('paypal', 'PayPal') }}. Approving again sends only the rest.</p>
+      <p class="hint">Already sent via {{ reminder.sent_channels|map(attribute='label')|join(' and ') }}. Approving again sends only the rest.</p>
       {% endif %}
       <textarea class="draft-edit" data-draft-id="{{ reminder.id }}" rows="6">{{ reminder.draft_text }}</textarea>
       <div class="row-actions">
@@ -178,7 +178,7 @@
         <label class="channel-pick">
           <span class="sr-only">Send via</span>
           <select data-channel-for="{{ reminder.id }}" aria-label="Send via">
-            {% if 'paypal' not in reminder.sent_channels %}
+            {% if not reminder.paypal_sent %}
             {% if reminder.has_paypal_id %}<option value="paypal">PayPal</option>{% endif %}
             <option value="email">Email</option>
             {% if reminder.has_paypal_id %}<option value="both">PayPal and email</option>{% endif %}

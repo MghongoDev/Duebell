@@ -1,4 +1,4 @@
-"""Add a Duebell user from the command line (issue #24).
+"""Add a Duebell user from the command line (issue #24, ADR 0008).
 
 There is no public sign-up. Whoever runs the server adds each user here:
 

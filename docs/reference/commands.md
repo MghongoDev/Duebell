@@ -16,7 +16,7 @@ The app listens on http://127.0.0.1:8000. The background scheduler drafts remind
 | --- | --- |
 | `scripts/reset_demo.py` | Deletes the SQLite file and seeds the demo. The same as `scripts/seed.py --reset`. |
 | `scripts/seed.py` | Creates `demo@duebell.test` if missing, then six clients with set payment habits and 26 invoices, all owned by that user. |
-| `scripts/seed.py --if-empty` | Seeds only if the database has no users. Use it at server start so a restart keeps real data. |
+| `scripts/seed.py --if-empty` | Seeds only if the database has no users, so running it at every start keeps existing data. |
 | `scripts/seed.py --require-password` | Exits with an error if `DEMO_PASSWORD` is unset, rather than use the published default. |
 | `scripts/create_user.py EMAIL` | Adds a user. Reads the password from `DUEBELL_PASSWORD` or a prompt. Passwords need at least 10 characters. |
 | `scripts/create_user.py EMAIL --claim` | Also gives that user every record with no owner. Use it once on a database from before sign-in. |
