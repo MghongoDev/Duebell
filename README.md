@@ -41,6 +41,7 @@ Step 2 works out of the box for the canonical sentence through the narrow mock p
 
 - `PAYPAL_MODE=mock` uses an in-memory PayPal adapter.
 - `PAYPAL_MODE=sandbox` calls the PayPal sandbox REST API.
+- `PAYPAL_MODE=toolkit` sends, reminds, records payments and reads status through PayPal's Agent Toolkit. Creating invoices and verifying webhooks stay on the REST path, because the toolkit cannot set payment terms and has no webhook check. Install it with `pip install -r requirements-toolkit.txt --no-deps`. The live check is pending while the sandbox Invoicing scope returns 403. See ADR 0006.
 - `LLM_MODE=mock` uses a narrow parser for the demo sentence and refuses anything else. The manual form and the reminder draft writer still work.
 - `LLM_MODE=live` calls an Anthropic-compatible endpoint.
 - `EMAIL_MODE=mock` keeps reminder emails in memory. `EMAIL_MODE=smtp` sends them through `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` and `SMTP_FROM`. When approving a reminder, pick PayPal, email, or both.

@@ -73,7 +73,7 @@ The property that replaying the same PayPal event changes nothing and returns a 
 _Avoid_: Deduplication, replay guard
 
 **Gateway**:
-The boundary that talks to PayPal. A mock gateway and a sandbox gateway implement the same interface.
+The boundary that talks to PayPal. The mock, sandbox and toolkit gateways implement the same interface.
 _Avoid_: Client, adapter, connector
 
 **Channel**:

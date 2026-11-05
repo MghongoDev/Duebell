@@ -1,0 +1,10 @@
+# Optional: PAYPAL_MODE=toolkit (issue #21, ADR 0006).
+# Install with --no-deps. The package pins LangChain, CrewAI and OpenAI Agents,
+# which Duebell does not use; its shared invoice layer needs only these.
+#   pip install -r requirements-toolkit.txt --no-deps
+paypal-agent-toolkit==1.11.0
+requests>=2.31
+charset-normalizer>=3
+idna>=3
+urllib3>=2
+certifi

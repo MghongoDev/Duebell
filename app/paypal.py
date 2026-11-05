@@ -1,13 +1,16 @@
-"""PayPal gateway for Duebell (issues #10, #11).
+"""PayPal gateway for Duebell (issues #10, #11, #21).
 
-The app talks to one protocol. A mock adapter keeps the demo offline, and a
-sandbox adapter calls PayPal's Invoicing v2 REST API. See ADR 0001.
+The app talks to one protocol. A mock adapter keeps the demo offline, a
+sandbox adapter calls PayPal's Invoicing v2 REST API, and a toolkit adapter
+routes most calls through PayPal's Agent Toolkit. See ADRs 0001 and 0006.
 """
 
 from __future__ import annotations
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from datetime import datetime, timezone
 from typing import Mapping, Protocol
 from uuid import uuid4
@@ -268,7 +271,91 @@ class SandboxPayPal:
         return response.json().get("verification_status") == "SUCCESS"
 
 
+class ToolkitPayPal(SandboxPayPal):
+    """PayPal through the official Agent Toolkit (issue #21, ADR 0006).
+
+    The app calls the toolkit directly. The model never sees these tools
+    (ADR 0004), and only an approved reminder reaches send_reminder (ADR 0003).
+
+    Create stays on the REST path inherited from SandboxPayPal, because the
+    toolkit's create and update tools cannot set payment terms or a due date.
+    Webhook verification also stays inherited: the toolkit has no tool for it.
+    The toolkit sets no HTTP timeout, so each call runs under the app's own.
+    """
+
+    def __init__(self, settings: Settings, toolkit=None, **kwargs) -> None:
+        super().__init__(settings, **kwargs)
+        self.toolkit = toolkit or _load_toolkit(settings)
+
+    def _run(self, method: str, params: dict) -> dict:
+        future = _TOOLKIT_POOL.submit(self.toolkit.run, method, params)
+        try:
+            result = future.result(timeout=self.settings.paypal_timeout_seconds)
+        except FutureTimeout as exc:
+            raise PayPalError(
+                f"PayPal did not answer within {self.settings.paypal_timeout_seconds:g} seconds. Try again."
+            ) from exc
+        except Exception as exc:  # the toolkit raises requests, pydantic and plain errors
+            raise PayPalError(f"PayPal rejected the call ({method}): {_short(exc)}") from exc
+        if isinstance(result, str):
+            try:
+                result = json.loads(result) if result.strip() else {}
+            except json.JSONDecodeError:
+                result = {}
+        return result if isinstance(result, dict) else {}
+
+    def send_invoice(self, paypal_invoice_id: str) -> None:
+        self._run("send_invoice", {"invoice_id": paypal_invoice_id, "send_to_recipient": True})
+
+    def send_reminder(self, paypal_invoice_id: str, subject: str, note: str) -> None:
+        self._run("send_invoice_reminder", {"invoice_id": paypal_invoice_id, "subject": subject, "note": note})
+
+    def record_payment(self, paypal_invoice_id: str, amount_cents: int, currency: str) -> None:
+        self._run(
+            "record_payment_for_invoice",
+            {
+                "invoice_id": paypal_invoice_id,
+                "method": "BANK_TRANSFER",
+                "payment_date": datetime.now(timezone.utc).date().isoformat(),
+                "amount": {"currency_code": currency, "value": f"{amount_cents / 100:.2f}"},
+            },
+        )
+
+    def get_invoice(self, paypal_invoice_id: str) -> str:
+        return self._run("get_invoice", {"invoice_id": paypal_invoice_id}).get("status", "UNKNOWN")
+
+
+_TOOLKIT_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="paypal-toolkit")
+
+
+def _short(exc: Exception) -> str:
+    text = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
+    return text[:200]
+
+
+def _load_toolkit(settings: Settings):
+    try:
+        from paypal_agent_toolkit.shared.api import PayPalAPI
+        from paypal_agent_toolkit.shared.configuration import Context
+    except ImportError as exc:
+        raise PayPalError(
+            "PAYPAL_MODE=toolkit needs the PayPal Agent Toolkit. "
+            "Run: pip install -r requirements-toolkit.txt --no-deps"
+        ) from exc
+    if not settings.paypal_client_id or not settings.paypal_client_secret:
+        raise PayPalError("PayPal credentials are missing.")
+    sandbox = "sandbox" in settings.paypal_base_url
+    context = Context(sandbox=sandbox, source="DUEBELL")
+    return PayPalAPI(
+        client_id=settings.paypal_client_id,
+        secret=settings.paypal_client_secret,
+        context=context,
+    )
+
+
 def build_gateway(settings: Settings) -> PayPalGateway:
     if settings.paypal_mode == "sandbox":
         return SandboxPayPal(settings)
+    if settings.paypal_mode == "toolkit":
+        return ToolkitPayPal(settings)
     return MockPayPal()
