@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import inspect, text
+from sqlalchemy import Index, inspect, text
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Field, SQLModel, create_engine
 
@@ -14,15 +14,29 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class Client(SQLModel, table=True):
+class User(SQLModel, table=True):
+    """A person who signs in. Every record below belongs to one user (issue #24)."""
+
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
     email: str = Field(index=True, unique=True)
+    password_hash: str
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class Client(SQLModel, table=True):
+    # Two users may bill the same client email, so email is unique per user.
+    __table_args__ = (Index("ux_client_user_email", "user_id", "email", unique=True),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
+    name: str
+    email: str = Field(index=True)
     created_at: datetime = Field(default_factory=utcnow)
 
 
 class Invoice(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
     client_id: int = Field(foreign_key="client.id", index=True)
     invoice_number: str = Field(index=True, unique=True)
     paypal_invoice_id: Optional[str] = Field(default=None, unique=True)
@@ -43,6 +57,7 @@ class Invoice(SQLModel, table=True):
 
 class Reminder(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
     invoice_id: int = Field(foreign_key="invoice.id", index=True)
     draft_text: str
     tone: str = "friendly"
@@ -56,6 +71,8 @@ class Reminder(SQLModel, table=True):
 
 class Event(SQLModel, table=True):
     paypal_event_id: str = Field(primary_key=True)
+    # The owner of the invoice the event touched. None if it matched no invoice.
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
     event_type: str
     payload: str = ""
     received_at: datetime = Field(default_factory=utcnow)
@@ -69,6 +86,7 @@ class Schedule(SQLModel, table=True):
     """
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
     kind: str = "RECURRING"
     client_id: int = Field(foreign_key="client.id", index=True)
     description: str = ""
@@ -87,6 +105,7 @@ class ScheduledInvoice(SQLModel, table=True):
     """One future invoice. UPCOMING, then PENDING approval, then SENT."""
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
     schedule_id: int = Field(foreign_key="schedule.id", index=True)
     sequence: int = 1
     amount_cents: int
@@ -101,6 +120,7 @@ class RiskComparison(SQLModel, table=True):
     """One refit of logistic regression against the rule baseline (issue #22)."""
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
     created_at: datetime = Field(default_factory=utcnow)
     status: str = "NOT_ENOUGH_HISTORY"
     rows_used: int = 0
@@ -126,6 +146,28 @@ def make_engine(database_url: str):
 def init_db(engine) -> None:
     SQLModel.metadata.create_all(engine)
     add_missing_columns(engine)
+    sync_indexes(engine)
+
+
+def sync_indexes(engine) -> None:
+    """Create indexes a newer model declares, and fix ones whose uniqueness changed.
+
+    Issue #24 made client email unique per user instead of globally, so an
+    older database must lose its global unique index on client.email.
+    """
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    with engine.begin() as connection:
+        for table in SQLModel.metadata.sorted_tables:
+            if table.name not in existing_tables:
+                continue
+            present = {index["name"]: bool(index["unique"]) for index in inspector.get_indexes(table.name)}
+            for index in table.indexes:
+                if index.name in present and present[index.name] != bool(index.unique):
+                    connection.execute(text(f'DROP INDEX "{index.name}"'))
+                    present.pop(index.name)
+                if index.name not in present:
+                    index.create(connection)
 
 
 def add_missing_columns(engine) -> None:

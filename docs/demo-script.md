@@ -9,6 +9,8 @@ Target length: 2 minutes 45 seconds. Record at 1440p or higher. Keep the cursor 
 PAYPAL_MODE=mock LLM_MODE=live .venv/bin/uvicorn app.web:app
 ```
 
+Sign in as `demo@duebell.test` (password `duebell-demo-2026`, or your `DEMO_PASSWORD`) before recording, so the video opens on the dashboard.
+
 Have the sentence ready: `Invoice Acme Studio, billing@acme.test, 1200 USD for logo design, net 2 days.`
 
 If the model endpoint is unavailable, fill the form manually and say that the manual path is the fallback. Do not hide the failure.

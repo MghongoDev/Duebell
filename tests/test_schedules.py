@@ -171,13 +171,13 @@ def test_risk_preview_flags_a_late_payer_without_saving(client):
     with Session(client.app.state.engine) as session:
         from app.models import Client
 
-        acme = Client(name="Acme Studio", email="billing@acme.test")
+        acme = Client(name="Acme Studio", email="billing@acme.test", user_id=client.user_id)
         session.add(acme)
         session.commit()
         for index in range(4):
             due = now - timedelta(days=200 - index * 40)
             session.add(
-                Invoice(client_id=acme.id, invoice_number=f"OLD-{index}", amount_cents=100_000,
+                Invoice(user_id=client.user_id, client_id=acme.id, invoice_number=f"OLD-{index}", amount_cents=100_000,
                         status="PAID", issued_at=due - timedelta(days=30), due_at=due,
                         paid_at=due + timedelta(days=25))
             )

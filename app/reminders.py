@@ -86,10 +86,14 @@ def draft_reminders(
     session: Session,
     settings: Settings,
     now: datetime | None = None,
+    user_id: int | None = None,
 ) -> list[Reminder]:
     blocked = _blocked_invoice_ids(session)
     created: list[Reminder] = []
-    for invoice in session.exec(select(Invoice).where(Invoice.status.in_(REMINDABLE_STATUSES))).all():
+    query = select(Invoice).where(Invoice.status.in_(REMINDABLE_STATUSES))
+    if user_id is not None:
+        query = query.where(Invoice.user_id == user_id)
+    for invoice in session.exec(query).all():
         if invoice.id in blocked or not is_due_for_reminder(invoice, settings, now):
             continue
         # A draft is only useful if approving it can reach PayPal.
@@ -99,7 +103,13 @@ def draft_reminders(
         if client is None:
             continue
         text, tone = reminder_text(invoice, client, settings, now)
-        reminder = Reminder(invoice_id=invoice.id, draft_text=text, tone=tone, status="PENDING")
+        reminder = Reminder(
+            user_id=invoice.user_id,
+            invoice_id=invoice.id,
+            draft_text=text,
+            tone=tone,
+            status="PENDING",
+        )
         session.add(reminder)
         created.append(reminder)
     if created:
@@ -208,10 +218,13 @@ def reject_reminder(session: Session, reminder: Reminder) -> Reminder:
     return reminder
 
 
-def reminder_rows(session: Session) -> list[dict]:
-    reminders = session.exec(select(Reminder).order_by(Reminder.created_at.desc())).all()
-    invoices = {invoice.id: invoice for invoice in session.exec(select(Invoice)).all()}
-    clients = {client.id: client for client in session.exec(select(Client)).all()}
+def reminder_rows(session: Session, user_id: int | None = None) -> list[dict]:
+    def mine(query, model):
+        return query if user_id is None else query.where(model.user_id == user_id)
+
+    reminders = session.exec(mine(select(Reminder), Reminder).order_by(Reminder.created_at.desc())).all()
+    invoices = {invoice.id: invoice for invoice in session.exec(mine(select(Invoice), Invoice)).all()}
+    clients = {client.id: client for client in session.exec(mine(select(Client), Client)).all()}
     rows = []
     for reminder in reminders:
         invoice = invoices.get(reminder.invoice_id)

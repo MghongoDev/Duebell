@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -40,7 +41,8 @@ from app.services import (
     refresh_invoice,
     simulate_payment,
 )
-from app.models import Client, Schedule, ScheduledInvoice
+from app.auth import COOKIE_NAME, SESSION_SECONDS, AuthError, Lockout, authenticate, make_session_cookie, read_session_cookie
+from app.models import Client, Schedule, ScheduledInvoice, User
 from app.risk import score_invoice
 from app.schedules import (
     INTERVAL_UNITS,
@@ -55,13 +57,14 @@ from app.schedules import (
     reject_scheduled,
     schedule_rows,
 )
-from app.services import client_history, get_or_create_client
+from app.services import client_history, get_or_create_client, get_owned
 from app.validation import FieldError, InvoiceProposal, proposal_to_cents, validate_proposal
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 MAX_WEBHOOK_BYTES = 1_000_000
 MAX_PROMPT_CHARS = 2_000
+PUBLIC_PATHS = {"/login", "/healthz", "/webhooks/paypal"}
 
 
 CHANNEL_LABELS = {"paypal": "PayPal", "email": "email"}
@@ -103,16 +106,20 @@ def _schedule_options(repeat: str, repeat_cycles: str, instalments: str, interva
     return plan, errors
 
 
-def _activity_rows(session: Session, limit: int = 20) -> list[dict]:
+def _uid(request: Request) -> int:
+    return request.state.user.id
+
+
+def _activity_rows(session: Session, user_id: int, limit: int = 20) -> list[dict]:
     rows = [
         {
             "event_id": event.paypal_event_id,
             "event_type": event.event_type,
             "at": event.received_at,
         }
-        for event in list_events(session, limit=limit)
+        for event in list_events(session, limit=limit, user_id=user_id)
     ]
-    for reminder in reminder_rows(session):
+    for reminder in reminder_rows(session, user_id):
         if reminder["status"] != "SENT" or not reminder["sent_at"]:
             continue
         via = " and ".join(CHANNEL_LABELS[name] for name in reminder["sent_channels"]) or "PayPal"
@@ -141,20 +148,22 @@ def _render_dashboard(
     form: dict | None = None,
     status_code: int = 200,
 ):
-    rows = invoice_rows(session)
+    user_id = _uid(request)
+    rows = invoice_rows(session, user_id)
     return TEMPLATES.TemplateResponse(
         request=request,
         name="dashboard.html",
         context={
             "rows": rows,
             "totals": dashboard_totals(rows),
-            "events": _activity_rows(session),
-            "reminders": reminder_rows(session),
+            "events": _activity_rows(session, user_id),
+            "reminders": reminder_rows(session, user_id),
+            "user": request.state.user,
             "errors": errors or [],
             "form": form or {},
             "currencies": request.app.state.settings.allowed_currencies,
-            "comparison": latest_comparison(session),
-            "schedules": schedule_rows(session),
+            "comparison": latest_comparison(session, user_id),
+            "schedules": schedule_rows(session, user_id),
             "instalment_range": range(MIN_INSTALMENTS, MAX_INSTALMENTS + 1),
         },
         status_code=status_code,
@@ -190,6 +199,29 @@ def create_app(
     app.state.llm = llm or build_parser(settings)
     app.state.scheduler_enabled = scheduler_enabled
     app.state.scheduler = None
+    # Without SECRET_KEY, sessions last until the process restarts.
+    app.state.secret_key = settings.secret_key or secrets.token_urlsafe(32)
+    app.state.lockout = Lockout()
+
+    @app.middleware("http")
+    async def require_sign_in(request: Request, call_next):
+        """Default-deny: every route needs a signed-in user unless listed here."""
+        path = request.url.path
+        if path in PUBLIC_PATHS or path.startswith("/static/"):
+            return await call_next(request)
+        user_id = read_session_cookie(request.app.state.secret_key, request.cookies.get(COOKIE_NAME))
+        user = None
+        if user_id is not None:
+            with Session(request.app.state.engine) as session:
+                user = session.get(User, user_id)
+                if user is not None:
+                    session.expunge(user)
+        if user is None:
+            if request.method == "GET" and not path.startswith("/api/"):
+                return RedirectResponse(url="/login", status_code=303)
+            return JSONResponse({"ok": False, "error": "Sign in first."}, status_code=401)
+        request.state.user = user
+        return await call_next(request)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -215,6 +247,43 @@ def create_app(
     @app.get("/healthz")
     def healthz():
         return {"ok": True, "service": "duebell"}
+
+    @app.get("/login", response_class=HTMLResponse)
+    def login_page(request: Request):
+        return TEMPLATES.TemplateResponse(request=request, name="login.html", context={"error": None, "email": ""})
+
+    @app.post("/login")
+    def login(
+        request: Request,
+        email: str = Form(""),
+        password: str = Form(""),
+        session: Session = Depends(get_session),
+    ):
+        try:
+            user = authenticate(session, email, password, request.app.state.lockout)
+        except AuthError as exc:
+            return TEMPLATES.TemplateResponse(
+                request=request,
+                name="login.html",
+                context={"error": str(exc), "email": email[:254]},
+                status_code=401,
+            )
+        response = RedirectResponse(url="/", status_code=303)
+        response.set_cookie(
+            COOKIE_NAME,
+            make_session_cookie(request.app.state.secret_key, user.id),
+            max_age=SESSION_SECONDS,
+            httponly=True,
+            samesite="lax",
+            secure=request.app.state.settings.cookie_secure,
+        )
+        return response
+
+    @app.post("/logout")
+    def logout():
+        response = RedirectResponse(url="/login", status_code=303)
+        response.delete_cookie(COOKIE_NAME)
+        return response
 
     @app.get("/", response_class=HTMLResponse)
     def dashboard(request: Request, session: Session = Depends(get_session)):
@@ -282,7 +351,7 @@ def create_app(
 
         if plan["instalments"]:
             # The plan only queues the instalments. Each waits for approval.
-            client = get_or_create_client(session, proposal.client_name, proposal.client_email)
+            client = get_or_create_client(session, proposal.client_name, proposal.client_email, _uid(request))
             try:
                 create_plan(
                     session,
@@ -293,16 +362,19 @@ def create_app(
                     terms_days=proposal.terms_days,
                     instalments=plan["instalments"],
                     interval_unit=plan["instalment_interval"],
+                    user_id=_uid(request),
                 )
             except ValueError as exc:
                 return _render_dashboard(
                     request, session, errors=[FieldError("instalments", str(exc))], form=form, status_code=422
                 )
-            draft_scheduled(session)
+            draft_scheduled(session, user_id=_uid(request))
             return RedirectResponse(url="/", status_code=303)
 
         try:
-            invoice = create_invoice(session, proposal, request.app.state.settings, request.app.state.gateway)
+            invoice = create_invoice(
+                session, proposal, request.app.state.settings, request.app.state.gateway, user_id=_uid(request)
+            )
         except PayPalError as exc:
             return _render_dashboard(
                 request,
@@ -322,6 +394,7 @@ def create_app(
                 interval_unit=plan["repeat"],
                 cycles=plan["repeat_cycles"],
                 first_issue=add_interval(invoice.issued_at, plan["repeat"], 1),
+                user_id=_uid(request),
             )
         return RedirectResponse(url="/", status_code=303)
 
@@ -335,7 +408,11 @@ def create_app(
         except (InvalidOperation, ValueError):
             return JSONResponse({"ok": False, "error": "Enter an amount and terms first."}, status_code=422)
         email = str(form.get("client_email", "")).strip().lower()
-        client = session.exec(select(Client).where(Client.email == email)).first() if email else None
+        client = (
+            session.exec(select(Client).where(Client.email == email, Client.user_id == _uid(request))).first()
+            if email
+            else None
+        )
         history = client_history(session, client.id) if client else []
         currency = str(form.get("currency", "USD")).strip().upper()
         result = score_invoice(amount_cents, terms, history, currency=currency)
@@ -343,7 +420,7 @@ def create_app(
 
     @app.post("/api/scheduled/{item_id}/approve", response_class=JSONResponse)
     def api_approve_scheduled(item_id: int, request: Request, session: Session = Depends(get_session)):
-        item = session.get(ScheduledInvoice, item_id)
+        item = get_owned(session, ScheduledInvoice, item_id, _uid(request))
         if item is None:
             return JSONResponse({"ok": False, "error": "Scheduled invoice not found."}, status_code=404)
         try:
@@ -355,8 +432,8 @@ def create_app(
         return {"ok": True, "status": item.status, "invoice_id": invoice.id}
 
     @app.post("/api/scheduled/{item_id}/reject", response_class=JSONResponse)
-    def api_reject_scheduled(item_id: int, session: Session = Depends(get_session)):
-        item = session.get(ScheduledInvoice, item_id)
+    def api_reject_scheduled(item_id: int, request: Request, session: Session = Depends(get_session)):
+        item = get_owned(session, ScheduledInvoice, item_id, _uid(request))
         if item is None:
             return JSONResponse({"ok": False, "error": "Scheduled invoice not found."}, status_code=404)
         try:
@@ -366,8 +443,8 @@ def create_app(
         return {"ok": True, "status": item.status}
 
     @app.post("/api/schedules/{schedule_id}/cancel", response_class=JSONResponse)
-    def api_cancel_schedule(schedule_id: int, session: Session = Depends(get_session)):
-        schedule = session.get(Schedule, schedule_id)
+    def api_cancel_schedule(schedule_id: int, request: Request, session: Session = Depends(get_session)):
+        schedule = get_owned(session, Schedule, schedule_id, _uid(request))
         if schedule is None:
             return JSONResponse({"ok": False, "error": "Schedule not found."}, status_code=404)
         cancel_schedule(session, schedule)
@@ -392,13 +469,13 @@ def create_app(
 
     @app.post("/api/reminders/scan", response_class=JSONResponse)
     def api_scan_reminders(request: Request, session: Session = Depends(get_session)):
-        created = draft_reminders(session, request.app.state.settings)
-        scheduled = draft_scheduled(session)
+        created = draft_reminders(session, request.app.state.settings, user_id=_uid(request))
+        scheduled = draft_scheduled(session, user_id=_uid(request))
         return {"ok": True, "created": len(created), "scheduled": len(scheduled)}
 
     @app.get("/api/reminders", response_class=JSONResponse)
-    def api_reminders(session: Session = Depends(get_session)):
-        return reminder_rows(session)
+    def api_reminders(request: Request, session: Session = Depends(get_session)):
+        return reminder_rows(session, _uid(request))
 
     @app.post("/api/reminders/{reminder_id}/approve", response_class=JSONResponse)
     async def api_approve_reminder(
@@ -406,7 +483,7 @@ def create_app(
         request: Request,
         session: Session = Depends(get_session),
     ):
-        reminder = session.get(Reminder, reminder_id)
+        reminder = get_owned(session, Reminder, reminder_id, _uid(request))
         if reminder is None:
             return JSONResponse({"ok": False, "error": "Reminder not found."}, status_code=404)
         form = await request.form()
@@ -438,7 +515,7 @@ def create_app(
         request: Request,
         session: Session = Depends(get_session),
     ):
-        reminder = session.get(Reminder, reminder_id)
+        reminder = get_owned(session, Reminder, reminder_id, _uid(request))
         if reminder is None:
             return JSONResponse({"ok": False, "error": "Reminder not found."}, status_code=404)
         if reminder.status != "PENDING":
@@ -454,8 +531,8 @@ def create_app(
         return {"ok": True, "draft_text": reminder.draft_text}
 
     @app.post("/api/reminders/{reminder_id}/reject", response_class=JSONResponse)
-    def api_reject_reminder(reminder_id: int, session: Session = Depends(get_session)):
-        reminder = session.get(Reminder, reminder_id)
+    def api_reject_reminder(reminder_id: int, request: Request, session: Session = Depends(get_session)):
+        reminder = get_owned(session, Reminder, reminder_id, _uid(request))
         if reminder is None:
             return JSONResponse({"ok": False, "error": "Reminder not found."}, status_code=404)
         try:
@@ -465,18 +542,18 @@ def create_app(
         return {"ok": True, "status": reminder.status}
 
     @app.post("/api/risk/refit", response_class=JSONResponse)
-    def api_risk_refit(session: Session = Depends(get_session)):
-        result = refit(session)
+    def api_risk_refit(request: Request, session: Session = Depends(get_session)):
+        result = refit(session, user_id=_uid(request))
         return {"ok": True, "comparison": result.model_dump(mode="json")}
 
     @app.get("/api/risk/comparison", response_class=JSONResponse)
-    def api_risk_comparison(session: Session = Depends(get_session)):
-        result = latest_comparison(session)
+    def api_risk_comparison(request: Request, session: Session = Depends(get_session)):
+        result = latest_comparison(session, _uid(request))
         return {"ok": True, "comparison": result.model_dump(mode="json") if result else None}
 
     @app.get("/api/invoices", response_class=JSONResponse)
-    def api_invoices(session: Session = Depends(get_session)):
-        return invoice_rows(session)
+    def api_invoices(request: Request, session: Session = Depends(get_session)):
+        return invoice_rows(session, _uid(request))
 
     @app.post("/api/invoices/{invoice_id}/refresh", response_class=JSONResponse)
     def api_refresh(
@@ -484,7 +561,7 @@ def create_app(
         request: Request,
         session: Session = Depends(get_session),
     ):
-        invoice = get_invoice(session, invoice_id)
+        invoice = get_invoice(session, invoice_id, _uid(request))
         if invoice is None:
             return JSONResponse({"ok": False, "error": "Invoice not found."}, status_code=404)
         try:
@@ -499,7 +576,7 @@ def create_app(
         request: Request,
         session: Session = Depends(get_session),
     ):
-        invoice = get_invoice(session, invoice_id)
+        invoice = get_invoice(session, invoice_id, _uid(request))
         if invoice is None:
             return JSONResponse({"ok": False, "error": "Invoice not found."}, status_code=404)
         try:

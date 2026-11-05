@@ -1,6 +1,7 @@
 """HTTP seam tests for invoice creation and listing (issues #9, #10)."""
 
 from app.paypal import PayPalError
+from tests.conftest import sign_in
 
 FORM = {
     "client_name": "Acme Studio",
@@ -47,7 +48,7 @@ def test_paypal_failure_is_readable(settings):
             raise PayPalError("PayPal rejected the call: sandbox said no.")
 
     app = create_app(settings=settings, engine=make_engine(settings.database_url), gateway=FailingGateway())
-    test_client = TestClient(app)
+    test_client = sign_in(TestClient(app))
     response = test_client.post("/invoices", data=FORM)
     assert response.status_code == 502
     assert "sandbox said no" in response.text
@@ -105,7 +106,7 @@ def test_send_failure_keeps_draft_with_paypal_id(settings):
             raise PayPalError("PayPal send said no.")
 
     app = create_app(settings=settings, engine=make_engine(settings.database_url), gateway=FailingSend())
-    test_client = TestClient(app)
+    test_client = sign_in(TestClient(app))
     response = test_client.post("/invoices", data=FORM)
     assert response.status_code == 502
     rows = test_client.get("/api/invoices").json()

@@ -17,6 +17,7 @@ from app.config import Settings
 from app.models import make_engine
 from app.paypal import PayPalError, ToolkitPayPal, build_gateway
 from app.web import create_app
+from tests.conftest import sign_in
 from tests.test_paypal_sandbox import NOW, FakeClient
 
 
@@ -123,7 +124,7 @@ def test_demo_flow_in_toolkit_mode():
     gw = gateway(toolkit)
     s = settings()
     app = create_app(settings=s, engine=make_engine(s.database_url), gateway=gw)
-    client = TestClient(app)
+    client = sign_in(TestClient(app))
     form = {
         "client_name": "Acme Studio",
         "client_email": "billing@acme.test",

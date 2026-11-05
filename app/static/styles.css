@@ -517,3 +517,19 @@ button.small {
     grid-template-columns: 1fr;
   }
 }
+
+.signed-in {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.login-panel {
+  max-width: 28rem;
+  margin: 2rem auto;
+}
+
+.login-form {
+  grid-template-columns: 1fr;
+}

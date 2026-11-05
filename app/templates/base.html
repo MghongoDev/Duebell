@@ -18,6 +18,12 @@
       <span>Duebell</span>
     </a>
     <p class="tagline">A bell that rings when an invoice comes due.</p>
+    {% if user %}
+    <form class="signed-in" method="post" action="/logout">
+      <span class="muted">{{ user.email }}</span>
+      <button class="ghost small" type="submit">Sign out</button>
+    </form>
+    {% endif %}
   </header>
 
   <main class="page">

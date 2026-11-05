@@ -52,11 +52,11 @@ Python 3.12+, FastAPI, Jinja2, HTMX, AG Grid Community, SQLModel, SQLite, APSche
 - Calibrate risk on real, consented payment history.
 - Learn from operator edits to improve the draft tone.
 - Add partial payments and multi-currency support.
-- Add authentication before anyone hosts this beyond a local demo.
+- Add password reset and self-service sign-up.
 
 ## Deliberate limits
 
-Duebell is a single-user sandbox demo with no login. Do not expose it on the public internet. The risk weights are hand-tuned. The demo moves no real money.
+Duebell is a sandbox demo. Each account sees only its own records, but users are added from the command line and there is no password reset. The risk weights are hand-tuned. The demo moves no real money.
 
 ## Links
 

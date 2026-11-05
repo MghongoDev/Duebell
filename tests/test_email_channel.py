@@ -14,13 +14,14 @@ from app.reminders import draft_reminders, parse_channels
 from app.services import create_invoice
 from app.validation import InvoiceProposal
 from app.web import create_app
+from tests.conftest import sign_in
 
 
 @pytest.fixture
 def client(settings):
     mailer = MockMailer()
     app = create_app(settings=settings, engine=make_engine(settings.database_url), mailer=mailer)
-    return TestClient(app)
+    return sign_in(TestClient(app))
 
 
 def pending_reminder(client) -> int:
@@ -34,7 +35,7 @@ def pending_reminder(client) -> int:
     )
     state = client.app.state
     with Session(state.engine) as session:
-        invoice = create_invoice(session, proposal, state.settings, state.gateway)
+        invoice = create_invoice(session, proposal, state.settings, state.gateway, user_id=client.user_id)
         invoice.due_at = utcnow() - timedelta(days=3)
         session.add(invoice)
         session.commit()

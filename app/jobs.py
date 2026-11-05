@@ -10,9 +10,10 @@ from __future__ import annotations
 import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.learning import refit
+from app.models import User
 from app.reminders import draft_reminders
 from app.schedules import draft_scheduled
 
@@ -42,7 +43,9 @@ def start_scheduler(app) -> BackgroundScheduler:
     def refit_tick() -> None:
         try:
             with Session(app.state.engine) as session:
-                refit(session)
+                user_ids = session.exec(select(User.id)).all()
+                for user_id in user_ids or [None]:
+                    refit(session, user_id=user_id)
         except Exception:  # a failed refit must not stop the scheduler
             log.exception("risk refit failed")
 

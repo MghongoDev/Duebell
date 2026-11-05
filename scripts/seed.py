@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
+from app.auth import create_user
 from app.config import get_settings
-from app.models import Client, Invoice, init_db, make_engine, utcnow
+from app.models import Client, Invoice, User, init_db, make_engine, utcnow
 from app.risk import HistoryInvoice, score_invoice
 
 CLIENTS = [
@@ -41,13 +43,27 @@ def reset_database(settings) -> None:
             path.unlink()
 
 
-def seed(session: Session) -> dict:
+DEMO_EMAIL = "demo@duebell.test"
+DEFAULT_DEMO_PASSWORD = "duebell-demo-2026"
+
+
+def demo_user(session: Session) -> User:
+    """The demo account. Set DEMO_PASSWORD before hosting anywhere public."""
+    user = session.exec(select(User).where(User.email == DEMO_EMAIL)).first()
+    if user:
+        return user
+    return create_user(session, DEMO_EMAIL, os.getenv("DEMO_PASSWORD", DEFAULT_DEMO_PASSWORD))
+
+
+def seed(session: Session, user_id: int | None = None) -> dict:
+    if user_id is None:
+        user_id = demo_user(session).id
     now = utcnow()
     counter = 0
     total_invoices = 0
 
     for index, (name, email, habit, history_count, amount, open_due_offset) in enumerate(CLIENTS):
-        client = Client(name=name, email=email)
+        client = Client(name=name, email=email, user_id=user_id)
         session.add(client)
         session.commit()
         session.refresh(client)
@@ -59,6 +75,7 @@ def seed(session: Session) -> dict:
             due = issued + timedelta(days=30)
             paid = due + timedelta(days=(habit or 0) + (step % 3 if habit else 0))
             invoice = Invoice(
+                user_id=user_id,
                 client_id=client.id,
                 invoice_number=f"DUE-SEED-{counter:04d}",
                 description=DESCRIPTIONS[(index + step) % len(DESCRIPTIONS)],
@@ -83,6 +100,7 @@ def seed(session: Session) -> dict:
         due = now + timedelta(days=open_due_offset)
         assessment = score_invoice(amount, 14, prior)
         invoice = Invoice(
+            user_id=user_id,
             client_id=client.id,
             invoice_number=f"DUE-SEED-{counter:04d}",
             description=DESCRIPTIONS[index % len(DESCRIPTIONS)],
@@ -116,6 +134,7 @@ def main() -> None:
     with Session(engine) as session:
         summary = seed(session)
     print(f"Seeded {summary['clients']} clients and {summary['invoices']} invoices.")
+    print(f"Sign in as {DEMO_EMAIL}. The password is DEMO_PASSWORD, or {DEFAULT_DEMO_PASSWORD} if unset.")
     print("Training data is synthetic. The risk model is a demonstration, not a validated predictor.")
 
 

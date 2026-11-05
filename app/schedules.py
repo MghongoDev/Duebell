@@ -71,12 +71,14 @@ def create_recurring(
     interval_count: int = 1,
     cycles: int | None = None,
     first_issue: datetime,
+    user_id: int | None = None,
 ) -> Schedule:
     """Repeat an invoice. `first_issue` is the next one after the invoice just sent."""
     _check_interval(interval_unit, interval_count)
     if cycles is not None and not 1 <= cycles <= MAX_CYCLES:
         raise ValueError(f"The number of repeats must be between 1 and {MAX_CYCLES}.")
     schedule = Schedule(
+        user_id=user_id,
         kind="RECURRING",
         client_id=client_id,
         description=description,
@@ -107,11 +109,13 @@ def create_plan(
     interval_unit: str = "MONTH",
     interval_count: int = 1,
     start: datetime | None = None,
+    user_id: int | None = None,
 ) -> Schedule:
     _check_interval(interval_unit, interval_count)
     amounts = split_amount(amount_cents, instalments)
     start = _aware(start or utcnow())
     schedule = Schedule(
+        user_id=user_id,
         kind="INSTALMENT",
         client_id=client_id,
         description=description,
@@ -128,6 +132,7 @@ def create_plan(
     for index, cents in enumerate(amounts):
         session.add(
             ScheduledInvoice(
+                user_id=schedule.user_id,
                 schedule_id=schedule.id,
                 sequence=index + 1,
                 amount_cents=cents,
@@ -151,6 +156,7 @@ def _queue_next(session: Session, schedule: Schedule, issue_on: datetime, sequen
         session.add(schedule)
     session.add(
         ScheduledInvoice(
+            user_id=schedule.user_id,
             schedule_id=schedule.id,
             sequence=sequence,
             amount_cents=schedule.amount_cents,
@@ -160,10 +166,15 @@ def _queue_next(session: Session, schedule: Schedule, issue_on: datetime, sequen
     )
 
 
-def draft_scheduled(session: Session, now: datetime | None = None) -> list[ScheduledInvoice]:
+def draft_scheduled(
+    session: Session, now: datetime | None = None, user_id: int | None = None
+) -> list[ScheduledInvoice]:
     """Move due scheduled invoices to PENDING. Nothing reaches PayPal here."""
     now = _aware(now or utcnow())
-    due = session.exec(select(ScheduledInvoice).where(ScheduledInvoice.status == "UPCOMING")).all()
+    query = select(ScheduledInvoice).where(ScheduledInvoice.status == "UPCOMING")
+    if user_id is not None:
+        query = query.where(ScheduledInvoice.user_id == user_id)
+    due = session.exec(query).all()
     drafted = []
     for item in due:
         if _aware(item.issue_on) > now:
@@ -198,7 +209,7 @@ def approve_scheduled(session: Session, item: ScheduledInvoice, settings: Settin
         currency=schedule.currency,
         terms_days=schedule.terms_days,
     )
-    invoice = create_invoice(session, proposal, settings, gateway)
+    invoice = create_invoice(session, proposal, settings, gateway, user_id=schedule.user_id)
     item.status = "SENT"
     item.invoice_id = invoice.id
     session.add(item)
@@ -252,10 +263,13 @@ def _finish_plan_if_done(session: Session, schedule: Schedule) -> None:
         session.commit()
 
 
-def schedule_rows(session: Session) -> dict:
-    clients = {client.id: client for client in session.exec(select(Client)).all()}
-    schedules = session.exec(select(Schedule).order_by(Schedule.id.desc())).all()
-    items = session.exec(select(ScheduledInvoice).order_by(ScheduledInvoice.issue_on)).all()
+def schedule_rows(session: Session, user_id: int | None = None) -> dict:
+    def mine(query, model):
+        return query if user_id is None else query.where(model.user_id == user_id)
+
+    clients = {client.id: client for client in session.exec(mine(select(Client), Client)).all()}
+    schedules = session.exec(mine(select(Schedule), Schedule).order_by(Schedule.id.desc())).all()
+    items = session.exec(mine(select(ScheduledInvoice), ScheduledInvoice).order_by(ScheduledInvoice.issue_on)).all()
     by_schedule: dict[int, list[ScheduledInvoice]] = {}
     for item in items:
         by_schedule.setdefault(item.schedule_id, []).append(item)

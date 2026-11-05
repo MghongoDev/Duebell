@@ -63,9 +63,10 @@ def _history_as_of(invoices: list[Invoice], as_of: datetime) -> list[HistoryInvo
     return history
 
 
-def training_rows(session: Session, now: datetime | None = None) -> list[dict]:
+def training_rows(session: Session, now: datetime | None = None, user_id: int | None = None) -> list[dict]:
     now = _aware(now) or utcnow()
-    invoices = list(session.exec(select(Invoice)).all())
+    query = select(Invoice) if user_id is None else select(Invoice).where(Invoice.user_id == user_id)
+    invoices = list(session.exec(query).all())
     by_client: dict[int, list[Invoice]] = {}
     for invoice in invoices:
         by_client.setdefault(invoice.client_id, []).append(invoice)
@@ -90,11 +91,12 @@ def training_rows(session: Session, now: datetime | None = None) -> list[dict]:
     return rows
 
 
-def refit(session: Session, now: datetime | None = None) -> RiskComparison:
-    rows = training_rows(session, now)
+def refit(session: Session, now: datetime | None = None, user_id: int | None = None) -> RiskComparison:
+    """Refit on one user's invoices. Users never train on each other's clients."""
+    rows = training_rows(session, now, user_id)
     late = sum(row["late"] for row in rows)
     on_time = len(rows) - late
-    result = RiskComparison(rows_used=len(rows), late_count=late)
+    result = RiskComparison(user_id=user_id, rows_used=len(rows), late_count=late)
 
     if len(rows) < MIN_ROWS or min(late, on_time) < MIN_PER_CLASS:
         result.status = "NOT_ENOUGH_HISTORY"
@@ -137,7 +139,8 @@ def _fit(rows: list[dict], result: RiskComparison) -> None:
     )
 
 
-def latest_comparison(session: Session) -> RiskComparison | None:
-    return session.exec(
-        select(RiskComparison).order_by(RiskComparison.id.desc()).limit(1)
-    ).first()
+def latest_comparison(session: Session, user_id: int | None = None) -> RiskComparison | None:
+    query = select(RiskComparison)
+    if user_id is not None:
+        query = query.where(RiskComparison.user_id == user_id)
+    return session.exec(query.order_by(RiskComparison.id.desc()).limit(1)).first()

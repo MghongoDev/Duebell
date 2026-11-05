@@ -26,15 +26,30 @@ EVENT_STATUS = {
 }
 
 
-def get_or_create_client(session: Session, name: str, email: str) -> Client:
+def owned(query, model, user_id: int | None):
+    """Filter a query to one user's rows. None means every user (scheduler only)."""
+    return query if user_id is None else query.where(model.user_id == user_id)
+
+
+def get_owned(session: Session, model, record_id, user_id: int | None):
+    """Fetch a row only if it belongs to the user. Another user's row reads as missing."""
+    record = session.get(model, record_id)
+    if record is None or (user_id is not None and record.user_id != user_id):
+        return None
+    return record
+
+
+def get_or_create_client(session: Session, name: str, email: str, user_id: int | None = None) -> Client:
     email = email.strip().lower()
-    client = session.exec(select(Client).where(Client.email == email)).first()
+    client = session.exec(
+        select(Client).where(Client.email == email, Client.user_id == user_id)
+    ).first()
     if client:
         if name.strip() and client.name != name.strip():
             client.name = name.strip()
             session.add(client)
         return client
-    client = Client(name=name.strip(), email=email)
+    client = Client(name=name.strip(), email=email, user_id=user_id)
     session.add(client)
     session.commit()
     session.refresh(client)
@@ -60,8 +75,14 @@ def client_history(session: Session, client_id: int) -> list[HistoryInvoice]:
     ]
 
 
-def create_invoice(session: Session, proposal: InvoiceProposal, settings: Settings, gateway) -> Invoice:
-    client = get_or_create_client(session, proposal.client_name, proposal.client_email)
+def create_invoice(
+    session: Session,
+    proposal: InvoiceProposal,
+    settings: Settings,
+    gateway,
+    user_id: int | None = None,
+) -> Invoice:
+    client = get_or_create_client(session, proposal.client_name, proposal.client_email, user_id)
     now = utcnow()
     amount_cents = proposal_to_cents(proposal.amount)
     currency = proposal.currency.strip().upper()
@@ -72,6 +93,7 @@ def create_invoice(session: Session, proposal: InvoiceProposal, settings: Settin
         currency=currency,
     )
     invoice = Invoice(
+        user_id=user_id,
         client_id=client.id,
         invoice_number=next_invoice_number(session),
         description=proposal.description.strip(),
@@ -126,23 +148,24 @@ def create_invoice(session: Session, proposal: InvoiceProposal, settings: Settin
     return invoice
 
 
-def list_invoices(session: Session) -> list[Invoice]:
-    return list(session.exec(select(Invoice).order_by(Invoice.created_at.desc())).all())
+def list_invoices(session: Session, user_id: int | None = None) -> list[Invoice]:
+    query = owned(select(Invoice), Invoice, user_id).order_by(Invoice.created_at.desc())
+    return list(session.exec(query).all())
 
 
-def get_invoice(session: Session, invoice_id: int) -> Invoice | None:
-    return session.get(Invoice, invoice_id)
+def get_invoice(session: Session, invoice_id: int, user_id: int | None = None) -> Invoice | None:
+    return get_owned(session, Invoice, invoice_id, user_id)
 
 
-def client_map(session: Session) -> dict[int, Client]:
-    return {client.id: client for client in session.exec(select(Client)).all()}
+def client_map(session: Session, user_id: int | None = None) -> dict[int, Client]:
+    return {client.id: client for client in session.exec(owned(select(Client), Client, user_id)).all()}
 
 
-def invoice_rows(session: Session) -> list[dict]:
-    clients = client_map(session)
+def invoice_rows(session: Session, user_id: int | None = None) -> list[dict]:
+    clients = client_map(session, user_id)
     now = utcnow()
     rows = []
-    for invoice in list_invoices(session):
+    for invoice in list_invoices(session, user_id):
         client = clients.get(invoice.client_id)
         overdue = invoice.status not in {"PAID", "CANCELLED", "REFUNDED"} and invoice.due_at < now
         rows.append(
@@ -272,16 +295,19 @@ def handle_webhook(session: Session, gateway, headers: Mapping[str, str], body: 
     paypal_invoice_id = resource.get("id") or (resource.get("invoice") or {}).get("id") or ""
     status = EVENT_STATUS.get(event_type)
     applied = False
-    if paypal_invoice_id and status:
-        invoice = find_by_paypal_id(session, paypal_invoice_id)
-        if invoice:
-            apply_status(invoice, status)
-            session.add(invoice)
-            applied = True
+    owner_id = None
+    invoice = find_by_paypal_id(session, paypal_invoice_id) if paypal_invoice_id else None
+    if invoice:
+        owner_id = invoice.user_id
+    if invoice and status:
+        apply_status(invoice, status)
+        session.add(invoice)
+        applied = True
 
     session.add(
         Event(
             paypal_event_id=event_id,
+            user_id=owner_id,
             event_type=event_type,
             payload=body[:20000],
         )
@@ -290,7 +316,6 @@ def handle_webhook(session: Session, gateway, headers: Mapping[str, str], body: 
     return {"ok": True, "applied": applied, "status": status}
 
 
-def list_events(session: Session, limit: int = 20) -> list[Event]:
-    return list(
-        session.exec(select(Event).order_by(Event.received_at.desc()).limit(limit)).all()
-    )
+def list_events(session: Session, limit: int = 20, user_id: int | None = None) -> list[Event]:
+    query = owned(select(Event), Event, user_id).order_by(Event.received_at.desc()).limit(limit)
+    return list(session.exec(query).all())

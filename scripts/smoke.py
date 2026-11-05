@@ -10,6 +10,7 @@ scan, approve the reminder, simulate payment, and replay the paid webhook. Run:
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -23,7 +24,7 @@ from app.config import get_settings
 from app.models import Client, Invoice, init_db, make_engine
 from app.paypal import MockPayPal
 from app.web import create_app
-from scripts.seed import reset_database, seed
+from scripts.seed import DEFAULT_DEMO_PASSWORD, DEMO_EMAIL, reset_database, seed
 
 SCRATCH_DB = "sqlite:////tmp/duebell-smoke.db"
 EXPECTED_CLIENTS = 6
@@ -46,6 +47,11 @@ def one_cycle(settings) -> dict:
 
     gateway = MockPayPal()
     client = TestClient(create_app(settings=settings, engine=engine, gateway=gateway))
+    signed_in = client.post(
+        "/login", data={"email": DEMO_EMAIL, "password": DEFAULT_DEMO_PASSWORD}, follow_redirects=False
+    )
+    check(signed_in.status_code == 303, f"demo sign-in returned {signed_in.status_code}")
+    check(client.get("/api/invoices").status_code == 200, "the demo user cannot read invoices")
 
     parsed = client.post("/parse", data={"description": DEMO_SENTENCE}).json()
     check(parsed.get("ok") is True, f"parse failed: {parsed}")
@@ -90,6 +96,7 @@ def one_cycle(settings) -> dict:
 
 
 def main() -> None:
+    os.environ.pop("DEMO_PASSWORD", None)
     settings = replace(get_settings(), database_url=SCRATCH_DB, llm_mode="mock", paypal_mode="mock")
     try:
         for cycle in range(1, 4):

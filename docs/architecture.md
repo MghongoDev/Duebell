@@ -69,7 +69,8 @@ PayPal posts to `/webhooks/paypal`. The gateway verifies the signature through P
 
 ## Deliberate limits
 
-- One user, no login. The app is a local demo.
+- Users are added from the command line. There is no public sign-up or password reset.
+- The sign-in lockout lives in process memory and resets on restart.
 - SQLite and one process. No queue, no multiple instances.
 - The risk weights are hand-tuned and not calibrated on real payments.
 - The demo moves no real money.

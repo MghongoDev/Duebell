@@ -30,7 +30,7 @@ def seed_invoice(client, *, due_days=-3, risk="HIGH"):
     )
     with Session(client.app.state.engine) as session:
         invoice = create_invoice(
-            session, proposal, client.app.state.settings, client.app.state.gateway
+            session, proposal, client.app.state.settings, client.app.state.gateway, user_id=client.user_id
         )
         invoice.due_at = utcnow() + timedelta(days=due_days)
         invoice.risk_level = risk

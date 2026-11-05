@@ -22,7 +22,15 @@ cp .env.example .env
 .venv/bin/uvicorn app.web:app --reload
 ```
 
-Open http://127.0.0.1:8000.
+Open http://127.0.0.1:8000 and sign in as `demo@duebell.test` with password `duebell-demo-2026`. Set `DEMO_PASSWORD` before seeding to choose another.
+
+Every account sees only its own clients, invoices, reminders, schedules and events. There is no public sign-up. Add a user from the command line:
+
+```bash
+.venv/bin/python scripts/create_user.py you@example.com
+```
+
+`--claim` gives the new user every record with no owner, for a database created before sign-in existed.
 
 ## Demo flow
 
@@ -71,12 +79,15 @@ The smoke script runs three clean reset-to-demo cycles. Each cycle reseeds six c
 
 ## Deploy
 
-`render.yaml` describes a small Render web service. It runs in mock mode, so the public demo needs no PayPal or model credentials. SQLite is ephemeral on the free plan; the demo reseeds on each deploy. Because the app has no login, treat a hosted instance as a demo only.
+`render.yaml` describes a small Render web service. It runs in mock mode, so the public demo needs no PayPal or model credentials. SQLite is ephemeral on the free plan, so the start command reseeds the demo and its user each time. Render generates `SECRET_KEY` and asks for `DEMO_PASSWORD` when you create the service.
 
 ## Security and limits
 
-Duebell is a single-user sandbox demo. It has no login, so do not expose it on the public internet.
+Duebell is a sandbox demo. Before hosting it, set `SECRET_KEY`, `COOKIE_SECURE=true` behind HTTPS, and a `DEMO_PASSWORD` of your own.
 
+- Every page and API route needs a signed-in user, except sign-in, the health check, static files and the PayPal webhook. A middleware denies by default, so a new route is protected without extra code.
+- Passwords are hashed with scrypt. The session is an HMAC-signed, HttpOnly, SameSite=Lax cookie that lasts 12 hours. Five failed sign-ins lock an email for 15 minutes.
+- Every record belongs to one user. A request for another user's record gets the same 404 as a missing one.
 - PayPal webhook signatures are verified before any state changes.
 - Events are deduplicated by PayPal event id.
 - Inputs are length-limited, amounts are capped, and currencies are allowlisted. Set `ALLOWED_CURRENCIES=USD,EUR` to invoice in more than one. Risk compares amounts only within a currency, and totals show one figure per currency.

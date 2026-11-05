@@ -10,6 +10,7 @@ from app.models import make_engine, utcnow
 from app.risk import HistoryInvoice, score_invoice
 from app.services import dashboard_totals
 from app.web import create_app
+from tests.conftest import sign_in
 
 FORM = {
     "client_name": "Acme Studio",
@@ -24,7 +25,7 @@ FORM = {
 @pytest.fixture
 def client(settings):
     settings = replace(settings, allowed_currencies=("USD", "EUR"))
-    return TestClient(create_app(settings=settings, engine=make_engine(settings.database_url)))
+    return sign_in(TestClient(create_app(settings=settings, engine=make_engine(settings.database_url))))
 
 
 def paid_on_time(amount_cents, currency):

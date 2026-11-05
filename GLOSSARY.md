@@ -4,6 +4,10 @@ Duebell is an invoice-to-cash agent for a single freelancer. It turns a plain-En
 
 ## Language
 
+**User**:
+A person who signs in to Duebell. Every client, invoice, reminder, schedule and event belongs to one user, and no user sees another's.
+_Avoid_: Account holder, operator (in code), tenant
+
 **Client**:
 A person or business that owes money on an invoice.
 _Avoid_: Customer, buyer, account

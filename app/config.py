@@ -46,6 +46,8 @@ class Settings:
     smtp_from: str = ""
     smtp_starttls: bool = True
     smtp_timeout_seconds: float = 20.0
+    secret_key: str = ""
+    cookie_secure: bool = False
 
 
 @lru_cache(maxsize=1)
@@ -83,4 +85,6 @@ def get_settings() -> Settings:
         smtp_from=os.getenv("SMTP_FROM", "").strip(),
         smtp_starttls=os.getenv("SMTP_STARTTLS", "true").strip().lower() not in {"0", "false", "no"},
         smtp_timeout_seconds=float(os.getenv("SMTP_TIMEOUT_SECONDS", "20")),
+        secret_key=os.getenv("SECRET_KEY", "").strip(),
+        cookie_secure=os.getenv("COOKIE_SECURE", "false").strip().lower() in {"1", "true", "yes"},
     )
