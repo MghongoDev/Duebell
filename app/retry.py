@@ -35,7 +35,7 @@ def call_with_retries(
     for attempt in range(attempts):
         try:
             return operation()
-        except RETRYABLE + (RetryableFailure,) as exc:
+        except RETRYABLE + (RetryableFailure,):
             if attempt == attempts - 1:
                 raise
             sleep(delay)

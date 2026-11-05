@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.config import Settings
 

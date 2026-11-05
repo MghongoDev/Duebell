@@ -49,7 +49,7 @@ Every other setting has a working default. [Configuration](docs/reference/config
 
 A PayPal AI Hackathon entry, November 2026.
 
-- The full flow works in mock mode. The tests and the smoke run cover it; run them before each commit, since there is no CI yet.
+- The full flow works in mock mode. GitHub Actions runs the lint, the tests, the smoke run and the offline evals on every push and pull request.
 - Sandbox and toolkit modes are wired and tested offline. Live sandbox calls returned `403 NOT_AUTHORIZED` for Invoicing during development, so neither has been checked end to end against PayPal.
 - The last live parsing eval, on 3 November 2026, got 10 of 10 cases and 50 of 50 fields right.
 - The risk weights are set by hand. The training data is synthetic.
