@@ -22,6 +22,7 @@ class HistoryInvoice:
     amount_cents: int
     due_at: datetime
     paid_at: datetime | None = None
+    currency: str = "USD"
 
 
 @dataclass(frozen=True)
@@ -47,13 +48,17 @@ def extract_features(
     history: list[HistoryInvoice],
     usual_amount_cents: int | None = None,
     now: datetime | None = None,
+    currency: str | None = None,
 ) -> dict:
     prior_count = len(history)
     lateness = [days_late(item, now) for item in history]
     late_count = sum(1 for days in lateness if days > 0)
     late_share = late_count / prior_count if prior_count else 0.0
     average_days_late = mean(lateness) if lateness else 0.0
-    usual = usual_amount_cents or (int(mean(item.amount_cents for item in history)) if history else amount_cents)
+    # Lateness is behaviour and uses every currency. Amounts only compare
+    # within one currency, so a client's EUR history never skews a USD ratio.
+    priced = [item for item in history if currency is None or item.currency == currency]
+    usual = usual_amount_cents or (int(mean(item.amount_cents for item in priced)) if priced else amount_cents)
     amount_ratio = amount_cents / usual if usual else 1.0
     return {
         "prior_count": prior_count,
@@ -63,6 +68,7 @@ def extract_features(
         "amount_ratio": amount_ratio,
         "terms_days": terms_days,
         "new_client": prior_count == 0,
+        "new_currency": prior_count > 0 and not priced,
         "limited_data": prior_count < LIMITED_DATA_BELOW,
     }
 
@@ -81,8 +87,9 @@ def score_invoice(
     history: list[HistoryInvoice],
     usual_amount_cents: int | None = None,
     now: datetime | None = None,
+    currency: str | None = None,
 ) -> RiskAssessment:
-    features = extract_features(amount_cents, terms_days, history, usual_amount_cents, now)
+    features = extract_features(amount_cents, terms_days, history, usual_amount_cents, now, currency)
     reasons: list[str] = []
 
     if features["new_client"]:
@@ -107,7 +114,11 @@ def score_invoice(
                 f"Paid {late} of last {prior} {invoice_word} late, average {days} {day_word}."
             )
 
-    if features["amount_ratio"] >= 1.5:
+    if features["new_currency"] and usual_amount_cents is None:
+        reasons.append(
+            f"First {currency} invoice for this client, so there is no usual amount to compare."
+        )
+    elif features["amount_ratio"] >= 1.5:
         score += 0.08
         reasons.append(
             f"This invoice is {features['amount_ratio']:.1f}x the client's usual amount."

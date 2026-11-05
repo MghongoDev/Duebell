@@ -75,7 +75,7 @@ Duebell is a single-user sandbox demo. It has no login, so do not expose it on t
 
 - PayPal webhook signatures are verified before any state changes.
 - Events are deduplicated by PayPal event id.
-- Inputs are length-limited, amounts are capped, and currencies are allowlisted.
+- Inputs are length-limited, amounts are capped, and currencies are allowlisted. Set `ALLOWED_CURRENCIES=USD,EUR` to invoice in more than one. Risk compares amounts only within a currency, and totals show one figure per currency.
 - Webhook payloads are capped at 1 MB.
 - Security headers and a content security policy are set on every response.
 - Secrets live in `.env`, which is ignored by git. `.env.example` lists the names.

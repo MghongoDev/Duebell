@@ -49,7 +49,12 @@ def next_invoice_number(session: Session) -> str:
 def client_history(session: Session, client_id: int) -> list[HistoryInvoice]:
     invoices = session.exec(select(Invoice).where(Invoice.client_id == client_id)).all()
     return [
-        HistoryInvoice(amount_cents=item.amount_cents, due_at=item.due_at, paid_at=item.paid_at)
+        HistoryInvoice(
+            amount_cents=item.amount_cents,
+            due_at=item.due_at,
+            paid_at=item.paid_at,
+            currency=item.currency,
+        )
         for item in invoices
         if item.status != "CANCELLED"
     ]
@@ -59,17 +64,19 @@ def create_invoice(session: Session, proposal: InvoiceProposal, settings: Settin
     client = get_or_create_client(session, proposal.client_name, proposal.client_email)
     now = utcnow()
     amount_cents = proposal_to_cents(proposal.amount)
+    currency = proposal.currency.strip().upper()
     assessment = score_invoice(
         amount_cents,
         proposal.terms_days,
         client_history(session, client.id),
+        currency=currency,
     )
     invoice = Invoice(
         client_id=client.id,
         invoice_number=next_invoice_number(session),
         description=proposal.description.strip(),
         amount_cents=amount_cents,
-        currency=proposal.currency.strip().upper(),
+        currency=currency,
         terms_days=proposal.terms_days,
         issued_at=now,
         due_at=now + timedelta(days=proposal.terms_days),
@@ -168,19 +175,41 @@ def invoice_rows(session: Session) -> list[dict]:
 def dashboard_totals(rows: list[dict]) -> dict:
     # Outstanding money owed = invoices that have left draft and are not yet
     # settled. A DRAFT has never been sent, so it is not a debt to collect.
-    outstanding = sum(
-        row["amount_cents"]
-        for row in rows
-        if row["status"] == "SENT" and row.get("paypal_invoice_id")
+    # Amounts in different currencies are never added together.
+    outstanding = _sum_by_currency(
+        row for row in rows if row["status"] == "SENT" and row.get("paypal_invoice_id")
     )
+    paid = _sum_by_currency(row for row in rows if row["status"] == "PAID")
     overdue = sum(1 for row in rows if row["overdue"])
-    paid = sum(row["amount_cents"] for row in rows if row["status"] == "PAID")
     return {
-        "outstanding_display": f"{outstanding / 100:,.2f}",
+        "outstanding": outstanding,
+        "paid": paid,
+        "outstanding_display": _money_by_currency(outstanding),
         "overdue_count": overdue,
-        "paid_display": f"{paid / 100:,.2f}",
+        "overdue_by_currency": _count_by_currency(row for row in rows if row["overdue"]),
+        "paid_display": _money_by_currency(paid),
         "invoice_count": len(rows),
     }
+
+
+def _sum_by_currency(rows) -> dict[str, int]:
+    totals: dict[str, int] = {}
+    for row in rows:
+        totals[row["currency"]] = totals.get(row["currency"], 0) + row["amount_cents"]
+    return dict(sorted(totals.items()))
+
+
+def _count_by_currency(rows) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row["currency"]] = counts.get(row["currency"], 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _money_by_currency(totals: dict[str, int]) -> str:
+    if not totals:
+        return "0.00"
+    return " · ".join(f"{cents / 100:,.2f} {code}" for code, cents in totals.items())
 
 
 def new_invoice_number() -> str:

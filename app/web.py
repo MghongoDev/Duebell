@@ -72,6 +72,7 @@ def _render_dashboard(
             "reminders": reminder_rows(session),
             "errors": errors or [],
             "form": form or {},
+            "currencies": request.app.state.settings.allowed_currencies,
         },
         status_code=status_code,
     )
