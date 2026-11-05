@@ -76,10 +76,80 @@
       <span>Terms (days)</span>
       <input name="terms_days" inputmode="numeric" value="{{ form.terms_days or '14' }}" required>
     </label>
+    <label>
+      <span>Repeat</span>
+      <select name="repeat">
+        <option value="" {% if not form.repeat %}selected{% endif %}>Does not repeat</option>
+        <option value="WEEK" {% if form.repeat == 'WEEK' %}selected{% endif %}>Weekly</option>
+        <option value="MONTH" {% if form.repeat == 'MONTH' %}selected{% endif %}>Monthly</option>
+      </select>
+    </label>
+    <label>
+      <span>Repeats (blank for no end)</span>
+      <input name="repeat_cycles" inputmode="numeric" value="{{ form.repeat_cycles or '' }}" placeholder="e.g. 6">
+    </label>
+    <div class="wide plan-offer" id="plan-offer" {% if not form.instalments %}hidden{% endif %}>
+      <p class="hint" id="plan-reason">This client scores High risk. You can split the amount into instalments instead of one invoice. Each instalment waits for your approval.</p>
+      <label>
+        <span>Instalments</span>
+        <select name="instalments">
+          <option value="">One invoice</option>
+          {% for count in instalment_range %}
+          <option value="{{ count }}" {% if form.instalments|string == count|string %}selected{% endif %}>{{ count }} instalments</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Spacing</span>
+        <select name="instalment_interval">
+          <option value="MONTH" {% if form.instalment_interval != 'WEEK' %}selected{% endif %}>Monthly</option>
+          <option value="WEEK" {% if form.instalment_interval == 'WEEK' %}selected{% endif %}>Weekly</option>
+        </select>
+      </label>
+    </div>
     <div class="form-actions">
       <button type="submit">Create invoice</button>
     </div>
   </form>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Scheduled invoices</h2>
+    <p>Repeats and instalments. Each one waits for your approval before PayPal sees it.</p>
+  </div>
+  {% if schedules.pending %}
+  <ul class="reminder-list">
+    {% for item in schedules.pending %}
+    <li class="reminder">
+      <div class="reminder-head">
+        <strong>{{ item.client_name }} · {{ item.amount_display }} {{ item.currency }}</strong>
+        <span class="status reminder-status-pending">PENDING</span>
+      </div>
+      <p>{{ item.description }} <span class="muted">· due to issue {{ item.issue_display }}</span></p>
+      <div class="row-actions">
+        <button class="small" data-post="/api/scheduled/{{ item.id }}/approve" data-busy="Sending...">Approve and send</button>
+        <button class="ghost small" data-post="/api/scheduled/{{ item.id }}/reject" data-busy="Working...">Skip this one</button>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if schedules.active %}
+  <ul class="activity">
+    {% for schedule in schedules.active %}
+    <li>
+      <span class="activity-type">{% if schedule.kind == 'INSTALMENT' %}Plan{% else %}Repeats{% endif %} · {{ schedule.client_name }}</span>
+      <span>{{ schedule.description }} · {{ schedule.amount_display }} {{ schedule.currency }}{% if schedule.kind == 'INSTALMENT' %} in {{ schedule.total }} parts, {{ schedule.sent }} sent{% else %} every {{ schedule.every }}{% endif %}</span>
+      <span class="muted">{% if schedule.next_display %}next {{ schedule.next_display }}{% endif %}</span>
+      <button class="ghost small" data-post="/api/schedules/{{ schedule.id }}/cancel" data-busy="Cancelling..." data-confirm="Stop future invoices from this schedule? Sent invoices stay as they are.">Cancel</button>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if not schedules.pending and not schedules.active %}
+  <div class="empty"><p>No repeats or instalment plans. Set one up from the new invoice form.</p></div>
+  {% endif %}
 </section>
 
 <section class="panel">
@@ -325,6 +395,36 @@ scanButton.addEventListener("click", () => {
   runAction(scanButton, "Scanning...", "/api/reminders/scan");
 });
 
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-post]");
+  if (!button) return;
+  if (button.dataset.confirm && !window.confirm(button.dataset.confirm)) return;
+  runAction(button, button.dataset.busy || "Working...", button.dataset.post);
+});
+
+const createForm = document.querySelector('input[name="client_email"]').form;
+const planOffer = document.getElementById("plan-offer");
+let previewTimer = null;
+async function previewRisk() {
+  const body = new URLSearchParams(new FormData(createForm));
+  try {
+    const response = await fetch("/api/risk/preview", { method: "POST", body });
+    if (!response.ok) return;
+    const data = await response.json();
+    const high = data.level === "HIGH";
+    const chosen = createForm.elements.instalments.value;
+    planOffer.hidden = !high && !chosen;
+  } catch (error) {
+    // The offer is optional; the form still works without it.
+  }
+}
+for (const name of ["client_email", "amount", "currency", "terms_days"]) {
+  createForm.elements[name].addEventListener("change", () => {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(previewRisk, 150);
+  });
+}
+
 const refitButton = document.getElementById("risk-refit");
 refitButton.addEventListener("click", () => {
   runAction(refitButton, "Refitting...", "/api/risk/refit");
@@ -385,6 +485,7 @@ document.getElementById("ai-fill").addEventListener("click", async () => {
           showError(`${value} is not an allowed currency. Pick one from the list.`);
         }
       }
+      previewRisk();
     }
   } catch (error) {
     showError("Could not reach the server. Check your connection and try again.");

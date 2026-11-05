@@ -169,6 +169,7 @@ body {
 }
 
 .invoice-form input,
+.invoice-form select,
 .invoice-form textarea {
   font: inherit;
   color: var(--ink);
@@ -490,4 +491,29 @@ button.small {
   text-align: left;
   padding: 0.4rem 0.5rem;
   border-bottom: 1px solid var(--line, #e5e5e5);
+}
+
+.plan-offer {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  padding: 0.8rem;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+}
+
+.plan-offer[hidden] {
+  display: none;
+}
+
+.plan-offer .hint {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+@media (max-width: 780px) {
+  .plan-offer {
+    grid-template-columns: 1fr;
+  }
 }

@@ -33,6 +33,8 @@ Open http://127.0.0.1:8000.
 5. Click `Approve and send`.
 6. Click `Simulate payment`. The status and activity feed update.
 
+An invoice can also repeat weekly or monthly, from the `Repeat` field. When the client scores High risk, the form offers to split the amount into two to six instalments. Either way, each later invoice waits in `Scheduled invoices` until you approve it.
+
 The seed script creates six clients with different payment habits, so the risk levels have something to work with. Seeded invoices never reached PayPal, so the scan drafts reminders only for invoices you create. Net 2 days puts the new invoice inside the reminder window.
 
 Step 2 works out of the box for the canonical sentence through the narrow mock parser. For free-form text, set `LLM_MODE=live` and a model endpoint. The manual form always works.

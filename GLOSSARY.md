@@ -76,6 +76,18 @@ _Avoid_: Deduplication, replay guard
 The boundary that talks to PayPal. The mock, sandbox and toolkit gateways implement the same interface.
 _Avoid_: Client, adapter, connector
 
+**Schedule**:
+A rule that produces future invoices for one client: a repeat (weekly or monthly, with or without an end) or an instalment plan. Cancelling it stops future invoices and leaves sent ones alone.
+_Avoid_: Subscription, series
+
+**Instalment plan**:
+A schedule that splits one amount into two to six invoices whose amounts sum exactly to the total. The form offers it when the client scores High risk.
+_Avoid_: Payment plan (in code), partial payment
+
+**Scheduled invoice**:
+One future invoice from a schedule. The scan moves it from upcoming to pending; only an approval creates and sends it through PayPal.
+_Avoid_: Queued invoice
+
 **Channel**:
 The route an approved reminder takes to the client: PayPal, email, or both. A reminder records each channel once it succeeds, so a retry never sends through the same channel twice.
 _Avoid_: Medium, transport

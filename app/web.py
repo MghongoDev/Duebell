@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, Request
@@ -11,7 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError as PydanticValidationError
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.config import Settings, get_settings
 from app.jobs import start_scheduler, stop_scheduler
@@ -39,7 +40,23 @@ from app.services import (
     refresh_invoice,
     simulate_payment,
 )
-from app.validation import FieldError, InvoiceProposal, validate_proposal
+from app.models import Client, Schedule, ScheduledInvoice
+from app.risk import score_invoice
+from app.schedules import (
+    INTERVAL_UNITS,
+    MAX_INSTALMENTS,
+    MIN_INSTALMENTS,
+    add_interval,
+    approve_scheduled,
+    cancel_schedule,
+    create_plan,
+    create_recurring,
+    draft_scheduled,
+    reject_scheduled,
+    schedule_rows,
+)
+from app.services import client_history, get_or_create_client
+from app.validation import FieldError, InvoiceProposal, proposal_to_cents, validate_proposal
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -48,6 +65,42 @@ MAX_PROMPT_CHARS = 2_000
 
 
 CHANNEL_LABELS = {"paypal": "PayPal", "email": "email"}
+
+
+def _schedule_options(repeat: str, repeat_cycles: str, instalments: str, interval: str):
+    """Read the optional repeat and instalment fields from the form."""
+    errors: list[FieldError] = []
+    plan = {"repeat": None, "repeat_cycles": None, "instalments": 0, "instalment_interval": "MONTH"}
+    repeat = (repeat or "").strip().upper()
+    if repeat:
+        if repeat not in INTERVAL_UNITS:
+            errors.append(FieldError("repeat", "Repeat weekly or monthly, or leave it off."))
+        else:
+            plan["repeat"] = repeat
+        if repeat_cycles.strip():
+            try:
+                plan["repeat_cycles"] = int(repeat_cycles)
+                if not 1 <= plan["repeat_cycles"] <= 60:
+                    raise ValueError
+            except ValueError:
+                errors.append(FieldError("repeat_cycles", "Repeats must be a whole number from 1 to 60."))
+    if instalments.strip() and instalments.strip() != "0":
+        try:
+            count = int(instalments)
+        except ValueError:
+            count = 0
+        if not MIN_INSTALMENTS <= count <= MAX_INSTALMENTS:
+            errors.append(
+                FieldError("instalments", f"Choose between {MIN_INSTALMENTS} and {MAX_INSTALMENTS} instalments.")
+            )
+        plan["instalments"] = count
+        interval = (interval or "MONTH").strip().upper()
+        if interval not in INTERVAL_UNITS:
+            errors.append(FieldError("instalment_interval", "Space instalments weekly or monthly."))
+        plan["instalment_interval"] = interval
+    if plan["repeat"] and plan["instalments"]:
+        errors.append(FieldError("repeat", "An invoice can repeat or be split into instalments, not both."))
+    return plan, errors
 
 
 def _activity_rows(session: Session, limit: int = 20) -> list[dict]:
@@ -101,6 +154,8 @@ def _render_dashboard(
             "form": form or {},
             "currencies": request.app.state.settings.allowed_currencies,
             "comparison": latest_comparison(session),
+            "schedules": schedule_rows(session),
+            "instalment_range": range(MIN_INSTALMENTS, MAX_INSTALMENTS + 1),
         },
         status_code=status_code,
     )
@@ -174,6 +229,10 @@ def create_app(
         amount: str = Form(""),
         currency: str = Form("USD"),
         terms_days: str = Form("14"),
+        repeat: str = Form(""),
+        repeat_cycles: str = Form(""),
+        instalments: str = Form(""),
+        instalment_interval: str = Form("MONTH"),
         session: Session = Depends(get_session),
     ):
         form = {
@@ -183,6 +242,10 @@ def create_app(
             "amount": amount,
             "currency": currency,
             "terms_days": terms_days,
+            "repeat": repeat,
+            "repeat_cycles": repeat_cycles,
+            "instalments": instalments,
+            "instalment_interval": instalment_interval,
         }
         try:
             terms = int(terms_days)
@@ -212,11 +275,34 @@ def create_app(
             return _render_dashboard(request, session, errors=errors, form=form, status_code=422)
 
         errors = validate_proposal(proposal, request.app.state.settings)
+        plan, schedule_errors = _schedule_options(repeat, repeat_cycles, instalments, instalment_interval)
+        errors += schedule_errors
         if errors:
             return _render_dashboard(request, session, errors=errors, form=form, status_code=422)
 
+        if plan["instalments"]:
+            # The plan only queues the instalments. Each waits for approval.
+            client = get_or_create_client(session, proposal.client_name, proposal.client_email)
+            try:
+                create_plan(
+                    session,
+                    client_id=client.id,
+                    description=proposal.description.strip(),
+                    amount_cents=proposal_to_cents(proposal.amount),
+                    currency=proposal.currency.strip().upper(),
+                    terms_days=proposal.terms_days,
+                    instalments=plan["instalments"],
+                    interval_unit=plan["instalment_interval"],
+                )
+            except ValueError as exc:
+                return _render_dashboard(
+                    request, session, errors=[FieldError("instalments", str(exc))], form=form, status_code=422
+                )
+            draft_scheduled(session)
+            return RedirectResponse(url="/", status_code=303)
+
         try:
-            create_invoice(session, proposal, request.app.state.settings, request.app.state.gateway)
+            invoice = create_invoice(session, proposal, request.app.state.settings, request.app.state.gateway)
         except PayPalError as exc:
             return _render_dashboard(
                 request,
@@ -225,7 +311,67 @@ def create_app(
                 form=form,
                 status_code=502,
             )
+        if plan["repeat"]:
+            create_recurring(
+                session,
+                client_id=invoice.client_id,
+                description=invoice.description,
+                amount_cents=invoice.amount_cents,
+                currency=invoice.currency,
+                terms_days=invoice.terms_days,
+                interval_unit=plan["repeat"],
+                cycles=plan["repeat_cycles"],
+                first_issue=add_interval(invoice.issued_at, plan["repeat"], 1),
+            )
         return RedirectResponse(url="/", status_code=303)
+
+    @app.post("/api/risk/preview", response_class=JSONResponse)
+    async def api_risk_preview(request: Request, session: Session = Depends(get_session)):
+        """Score a draft form without saving anything, so the form can offer a plan."""
+        form = await request.form()
+        try:
+            amount_cents = proposal_to_cents(Decimal(str(form.get("amount", "")).strip()))
+            terms = int(str(form.get("terms_days", "14")))
+        except (InvalidOperation, ValueError):
+            return JSONResponse({"ok": False, "error": "Enter an amount and terms first."}, status_code=422)
+        email = str(form.get("client_email", "")).strip().lower()
+        client = session.exec(select(Client).where(Client.email == email)).first() if email else None
+        history = client_history(session, client.id) if client else []
+        currency = str(form.get("currency", "USD")).strip().upper()
+        result = score_invoice(amount_cents, terms, history, currency=currency)
+        return {"ok": True, "level": result.level, "score": result.score, "reasons": result.reasons}
+
+    @app.post("/api/scheduled/{item_id}/approve", response_class=JSONResponse)
+    def api_approve_scheduled(item_id: int, request: Request, session: Session = Depends(get_session)):
+        item = session.get(ScheduledInvoice, item_id)
+        if item is None:
+            return JSONResponse({"ok": False, "error": "Scheduled invoice not found."}, status_code=404)
+        try:
+            invoice = approve_scheduled(session, item, request.app.state.settings, request.app.state.gateway)
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+        except PayPalError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+        return {"ok": True, "status": item.status, "invoice_id": invoice.id}
+
+    @app.post("/api/scheduled/{item_id}/reject", response_class=JSONResponse)
+    def api_reject_scheduled(item_id: int, session: Session = Depends(get_session)):
+        item = session.get(ScheduledInvoice, item_id)
+        if item is None:
+            return JSONResponse({"ok": False, "error": "Scheduled invoice not found."}, status_code=404)
+        try:
+            reject_scheduled(session, item)
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+        return {"ok": True, "status": item.status}
+
+    @app.post("/api/schedules/{schedule_id}/cancel", response_class=JSONResponse)
+    def api_cancel_schedule(schedule_id: int, session: Session = Depends(get_session)):
+        schedule = session.get(Schedule, schedule_id)
+        if schedule is None:
+            return JSONResponse({"ok": False, "error": "Schedule not found."}, status_code=404)
+        cancel_schedule(session, schedule)
+        return {"ok": True, "status": schedule.status}
 
     @app.post("/parse", response_class=JSONResponse)
     async def parse_description(request: Request):
@@ -247,7 +393,8 @@ def create_app(
     @app.post("/api/reminders/scan", response_class=JSONResponse)
     def api_scan_reminders(request: Request, session: Session = Depends(get_session)):
         created = draft_reminders(session, request.app.state.settings)
-        return {"ok": True, "created": len(created)}
+        scheduled = draft_scheduled(session)
+        return {"ok": True, "created": len(created), "scheduled": len(scheduled)}
 
     @app.get("/api/reminders", response_class=JSONResponse)
     def api_reminders(session: Session = Depends(get_session)):

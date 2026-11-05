@@ -61,6 +61,42 @@ class Event(SQLModel, table=True):
     received_at: datetime = Field(default_factory=utcnow)
 
 
+class Schedule(SQLModel, table=True):
+    """A rule that produces future invoices (issue #25).
+
+    RECURRING repeats one amount every interval. INSTALMENT splits one amount
+    into a fixed set of scheduled invoices.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    kind: str = "RECURRING"
+    client_id: int = Field(foreign_key="client.id", index=True)
+    description: str = ""
+    amount_cents: int
+    currency: str = "USD"
+    terms_days: int = 14
+    interval_unit: str = "MONTH"
+    interval_count: int = 1
+    # Recurring only: how many more invoices to queue. None repeats until cancelled.
+    cycles_left: Optional[int] = None
+    status: str = "ACTIVE"
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class ScheduledInvoice(SQLModel, table=True):
+    """One future invoice. UPCOMING, then PENDING approval, then SENT."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    schedule_id: int = Field(foreign_key="schedule.id", index=True)
+    sequence: int = 1
+    amount_cents: int
+    description: str = ""
+    issue_on: datetime
+    status: str = "UPCOMING"
+    invoice_id: Optional[int] = Field(default=None, foreign_key="invoice.id")
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class RiskComparison(SQLModel, table=True):
     """One refit of logistic regression against the rule baseline (issue #22)."""
 

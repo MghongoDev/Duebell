@@ -14,6 +14,7 @@ from sqlmodel import Session
 
 from app.learning import refit
 from app.reminders import draft_reminders
+from app.schedules import draft_scheduled
 
 log = logging.getLogger("duebell.jobs")
 
@@ -25,6 +26,7 @@ def start_scheduler(app) -> BackgroundScheduler:
         try:
             with Session(app.state.engine) as session:
                 draft_reminders(session, app.state.settings)
+                draft_scheduled(session)
         except Exception:  # the scheduler must survive a bad tick
             log.exception("reminder scan failed")
 
