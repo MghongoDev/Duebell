@@ -26,14 +26,14 @@ Open http://127.0.0.1:8000.
 
 ## Demo flow
 
-1. Type a sentence such as `Invoice Acme Studio, billing@acme.test, 1200 USD for logo design, net 14 days.`
+1. Type a sentence such as `Invoice Acme Studio, billing@acme.test, 1200 USD for logo design, net 2 days.`
 2. Click `Fill fields with AI`, check the fields, then click `Create invoice`.
 3. Read the risk badge and its reasons.
 4. Click `Scan now`. Read the pending reminder.
 5. Click `Approve and send`.
 6. Click `Simulate payment`. The status and activity feed update.
 
-The seed script creates six clients with different payment habits, so the risk levels and reminder tones have something to work with.
+The seed script creates six clients with different payment habits, so the risk levels have something to work with. Seeded invoices never reached PayPal, so the scan drafts reminders only for invoices you create. Net 2 days puts the new invoice inside the reminder window.
 
 Step 2 works out of the box for the canonical sentence through the narrow mock parser. For free-form text, set `LLM_MODE=live` and a model endpoint. The manual form always works.
 

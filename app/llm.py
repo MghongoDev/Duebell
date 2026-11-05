@@ -153,15 +153,19 @@ def _mock_parse(text: str, settings: Settings) -> InvoiceProposal:
     return validate_payload(payload, settings)
 
 
+def live_ready(settings: Settings) -> bool:
+    """True when live mode has a credential and a base URL to call."""
+    has_credential = bool(settings.anthropic_api_key or settings.anthropic_auth_token)
+    return has_credential and bool(settings.anthropic_base_url)
+
+
 def build_parser(settings: Settings):
     def parse(text: str) -> InvoiceProposal:
         if settings.llm_mode != "live":
             return _mock_parse(text, settings)
-        # Live mode needs an Anthropic endpoint to reach. Live mode requires an
-        # API key (or auth token) and a base URL. If any piece of that minimum
-        # configuration is missing, fall back to the deterministic mock instead
-        # of hitting the network and returning 401.
-        if not (settings.anthropic_api_key or settings.anthropic_auth_token) or not settings.anthropic_base_url:
+        # Without a credential and a base URL, live mode falls back to the
+        # deterministic mock instead of hitting the network and returning 401.
+        if not live_ready(settings):
             return _mock_parse(text, settings)
         return validate_payload(_call_model(text, settings), settings)
 

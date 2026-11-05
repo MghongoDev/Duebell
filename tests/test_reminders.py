@@ -99,6 +99,16 @@ def test_scan_drafts_due_soon_high_risk(client):
         assert len(draft_reminders(session, client.app.state.settings)) == 1
 
 
+def test_scan_skips_invoices_without_a_paypal_id(client):
+    invoice_id = seed_invoice(client)
+    with Session(client.app.state.engine) as session:
+        invoice = session.get(Invoice, invoice_id)
+        invoice.paypal_invoice_id = None
+        session.add(invoice)
+        session.commit()
+        assert draft_reminders(session, client.app.state.settings) == []
+
+
 def test_approval_sends_once(client):
     seed_invoice(client)
     with Session(client.app.state.engine) as session:

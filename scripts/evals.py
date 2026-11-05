@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlmodel import Session, select
 
 from app.config import Settings, get_settings
-from app.llm import LLMError, build_parser
+from app.llm import LLMError, build_parser, live_ready
 from app.models import Client, Event, Invoice, init_db, make_engine, utcnow
 from app.paypal import MockPayPal
 from app.reminders import money, reminder_text
@@ -156,6 +156,14 @@ def run_parse_eval(settings: Settings, force_live: bool) -> bool:
     if settings.llm_mode != "live" and not force_live:
         print("Parse eval skipped. Set LLM_MODE=live or pass --live.")
         return True
+    if not live_ready(settings):
+        # build_parser would quietly fall back to the mock, which only knows
+        # the demo sentence, and the score would describe the mock instead.
+        print(
+            "Parse eval skipped. Live mode needs ANTHROPIC_API_KEY or "
+            "ANTHROPIC_AUTH_TOKEN, and ANTHROPIC_BASE_URL."
+        )
+        return not force_live
 
     parser = build_parser(replace(settings, llm_mode="live"))
     field_total = 0

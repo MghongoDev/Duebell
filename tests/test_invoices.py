@@ -75,6 +75,14 @@ def test_amount_above_cap_is_rejected(client):
     assert "at most" in response.text
 
 
+def test_terms_outside_the_allowed_range_are_rejected(client):
+    for terms in ("-1", "121"):
+        response = client.post("/invoices", data=dict(FORM, terms_days=terms))
+        assert response.status_code == 422
+        assert "between 0 and 120 days" in response.text
+    assert client.get("/api/invoices").json() == []
+
+
 def test_dashboard_includes_grid_and_ai_panels(client):
     client.post("/invoices", data=FORM, follow_redirects=False)
     page = client.get("/")

@@ -91,6 +91,9 @@ def draft_reminders(
     for invoice in session.exec(select(Invoice).where(Invoice.status.in_(REMINDABLE_STATUSES))).all():
         if invoice.id in blocked or not is_due_for_reminder(invoice, settings, now):
             continue
+        # A draft is only useful if approving it can reach PayPal.
+        if not invoice.paypal_invoice_id:
+            continue
         client = session.get(Client, invoice.client_id)
         if client is None:
             continue

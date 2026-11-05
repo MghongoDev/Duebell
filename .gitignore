@@ -9,6 +9,7 @@ duebell.db
 
 # Local notes and planning
 .scratch/
+scratch/
 duebell-implementation-guide.md
 invoice-to-cash-agent-implementation-guide.md
 
