@@ -6,7 +6,8 @@ Duebell is one FastAPI process over one SQLite file ([ADR 0005](../adr/0005-sqli
 
 | Path | Role |
 | --- | --- |
-| `app/web.py` | App wiring, routes, the sign-in middleware, security headers. |
+| `app/web.py` | App wiring, the sign-in middleware, security headers. |
+| `app/routes/` | The routes, one module per area: sign-in, dashboard, invoices, risk, schedules, reminders, the PayPal webhook. `common.py` holds the session dependency and the signed-in user helper. |
 | `app/auth.py` | Password hashing, the signed session cookie, the sign-in lockout. |
 | `app/ownership.py` | Scopes every query to one user, or to every user for the scheduler. |
 | `app/config.py` | Reads the [configuration](../reference/configuration.md). |
