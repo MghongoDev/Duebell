@@ -55,9 +55,9 @@ Click "Simulate payment". Show the status change and the activity feed.
 
 ### 2:15 to 2:40: How it fits together
 
-Show `docs/architecture.md` or a simple diagram.
+Show `docs/explanation/architecture.md` or a simple diagram.
 
-> One FastAPI process, one SQLite file, one gateway boundary. Mock and sandbox adapters share the same interface. The model is an untrusted form filler. The risk score is explainable. The PayPal webhook is signed and idempotent.
+> One FastAPI process, one SQLite file, one gateway boundary. Mock, sandbox and toolkit gateways share the same interface. The model is an untrusted form filler. The risk score is explainable. The PayPal webhook is signed and idempotent.
 
 ### 2:40 to 2:45: Close
 

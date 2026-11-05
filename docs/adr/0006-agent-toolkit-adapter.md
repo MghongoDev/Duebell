@@ -42,3 +42,7 @@ Add `ToolkitPayPal` as a third adapter behind `PayPalGateway`, chosen by `PAYPAL
 - A toolkit call that times out keeps running in its worker thread until `requests` gives up. The app has already answered the operator.
 - The reminder tool's stdout lines show up in the server log.
 - The toolkit sends `null` for unused optional fields. Only a live sandbox run can confirm PayPal accepts them. That check waits until the sandbox app's Invoicing scope stops returning 403.
+
+## Revision, 2026-11-05
+
+A review found that a timed-out toolkit call keeps running and may still reach PayPal, so retrying a reminder could send it twice. A timeout now raises `PayPalTimeout`. For a reminder, Duebell counts the PayPal channel as sent and warns the user to check PayPal. One possible missed reminder is cheaper than a duplicate the client sees (ADR 0003). The consequence above, "the operator tries again", now holds only for errors that are not timeouts.

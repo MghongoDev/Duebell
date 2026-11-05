@@ -1,0 +1,46 @@
+# Commands
+
+Run each command from the repository root with the virtual environment's Python. Every script reads the same [configuration](configuration.md) as the app, including `DATABASE_URL`.
+
+## Run the app
+
+```bash
+.venv/bin/uvicorn app.web:app --reload
+```
+
+The app listens on http://127.0.0.1:8000. The background scheduler drafts reminders every 30 minutes and refits the [risk comparison](../explanation/risk-scores.md) every six hours.
+
+## Data and users
+
+| Command | Does |
+| --- | --- |
+| `scripts/reset_demo.py` | Deletes the SQLite file and seeds the demo. The same as `scripts/seed.py --reset`. |
+| `scripts/seed.py` | Creates `demo@duebell.test` if missing, then six clients with set payment habits and 26 invoices, all owned by that user. |
+| `scripts/seed.py --if-empty` | Seeds only if the database has no users. Use it at server start so a restart keeps real data. |
+| `scripts/seed.py --require-password` | Exits with an error if `DEMO_PASSWORD` is unset, rather than use the published default. |
+| `scripts/create_user.py EMAIL` | Adds a user. Reads the password from `DUEBELL_PASSWORD` or a prompt. Passwords need at least 10 characters. |
+| `scripts/create_user.py EMAIL --claim` | Also gives that user every record with no owner. Use it once on a database from before sign-in. |
+
+## Checks
+
+| Command | Does |
+| --- | --- |
+| `pytest -q` | Runs the test suite. No network, no credentials. |
+| `scripts/smoke.py` | Resets a scratch database three times and runs the whole demo through the HTTP routes each time: sign in, parse, create, scan, approve the reminder, simulate payment, replay the webhook, refresh. Prints `Smoke: pass` or the step that failed. |
+| `scripts/evals.py` | Ten reminder cases and a webhook replay check, offline. The ten parsing cases run only in live mode with credentials; otherwise the script says it skipped them. Exits non-zero on any failure. |
+| `scripts/evals.py --live` | Forces the parsing cases. Fails if live mode has no credentials. |
+| `scripts/train_risk.py` | Fits logistic regression on synthetic histories and prints held-out accuracy and AUC beside the rule baseline. |
+
+## PayPal
+
+| Command | Does |
+| --- | --- |
+| `scripts/register_webhook.py --url URL` | Registers a PayPal webhook for invoice events at a public HTTPS URL ending in `/webhooks/paypal`, and prints its ID for `PAYPAL_WEBHOOK_ID`. Needs sandbox credentials. |
+
+## Optional install
+
+```bash
+.venv/bin/pip install -r requirements-toolkit.txt --no-deps
+```
+
+Installs PayPal's Agent Toolkit for `PAYPAL_MODE=toolkit`. Keep `--no-deps`: the package pins LangChain, CrewAI and OpenAI Agents, which Duebell never imports ([ADR 0006](../adr/0006-agent-toolkit-adapter.md)).

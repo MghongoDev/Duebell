@@ -15,11 +15,15 @@ A freelancer finishes the work, sends the invoice, and then has to remember to c
 3. Scores late-payment risk from the client's history, with reasons a person can check.
 4. Scans for invoices that are overdue or due soon and drafts a reminder. A human approves it. Only then does PayPal send it.
 5. Handles a paid webhook, a manual refresh, and a mock payment. The next invoice sees the new history.
+6. Repeats an invoice, or splits a High-risk one into instalments. Each later invoice waits for approval.
+7. Sends an approved reminder through PayPal, email, or both, and never through the same channel twice.
+8. Keeps each user's clients and invoices apart, behind a sign-in.
 
 ## How it uses PayPal
 
 - PayPal Invoicing v2 creates and sends invoices.
 - PayPal's reminder endpoint sends an approved reminder.
+- An optional mode routes sending, reminders, payments and status through PayPal's Agent Toolkit. The app calls the toolkit directly; the model never gets PayPal tools.
 - PayPal webhooks report paid, cancelled, and refunded events.
 - Webhook signatures are verified before any state changes. Event ids make replays safe.
 - The app runs against the PayPal sandbox. It moves no real money.
@@ -32,9 +36,9 @@ A freelancer finishes the work, sends the invoice, and then has to remember to c
 
 ## Evidence
 
-- `pytest`: 66 tests pass.
+- `pytest`: 143 tests pass, with no network or credentials.
 - Live evals on 3 November 2026: parse 10 of 10 cases exact with 50 of 50 fields correct, reminders 10 of 10, webhook pass.
-- `scripts/smoke.py`: three clean reset-to-demo cycles, each with six clients, 26 invoices, two pending drafts, and zero sends.
+- `scripts/smoke.py`: three full demo runs from a fresh database, through the HTTP routes: sign in, parse, create, scan, approve the reminder, simulate payment, replay the webhook, refresh.
 - The dashboard screenshot in the README comes from the seeded mock mode.
 
 ## Built with
@@ -43,15 +47,16 @@ Python 3.12+, FastAPI, Jinja2, HTMX, AG Grid Community, SQLModel, SQLite, APSche
 
 ## Challenges
 
-- PayPal sandbox Invoicing calls returned `403 NOT_AUTHORIZED` during development even after the Invoicing feature was enabled. The mock gateway keeps the demo reproducible. The sandbox adapter is wired, and its request payloads are tested without a network call.
+- PayPal sandbox Invoicing calls returned `403 NOT_AUTHORIZED` during development even after the Invoicing feature was enabled. The mock gateway keeps the demo reproducible. The sandbox gateway is wired, and its request payloads are tested without a network call.
 - The model can return a plausible wrong value. The fix was to make the model a form filler, not an agent, and to keep the manual form as the fallback.
 - Reminder tone is a judgement call. The app uses a small, visible rule and shows the whole draft before approval.
 
 ## What is next
 
 - Calibrate risk on real, consented payment history.
-- Learn from operator edits to improve the draft tone.
-- Add partial payments and multi-currency support.
+- Learn from the user's edits to improve the draft tone.
+- Split the risk comparison's held-out invoices by time rather than at random.
+- Send a PayPal request ID so retried sandbox calls cannot act twice.
 - Add password reset and self-service sign-up.
 
 ## Deliberate limits
@@ -60,5 +65,5 @@ Duebell is a sandbox demo. Each account sees only its own records, but users are
 
 ## Links
 
-- Repository: https://github.com/MghongoDev/duebell
+- Repository: https://github.com/MghongoDev/Duebell
 - Video: add the public video link before submitting.

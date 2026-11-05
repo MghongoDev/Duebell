@@ -34,3 +34,9 @@ Until issue #24, Duebell had no login and one implicit user, so it could not be 
 - The background scheduler still works across all users. Each refit trains on one user's invoices only.
 - The sign-in lockout is per process and resets on restart.
 - An existing database keeps working: new columns and indexes are added at startup, and `--claim` assigns its rows.
+
+## Revision, 2026-11-05
+
+A review found that the query helpers took `user_id=None` by default, and `None` meant every user. A route that forgot the argument would have read everyone's records, which is the risk this record set out to remove. Every query now takes a scope with no default: a user ID, or `EVERY_USER` (`app/ownership.py`), which only the scheduler uses. Passing `None` raises `TypeError`. A refit refuses `EVERY_USER`, so it always trains on one user's invoices.
+
+The same review moved the Render start command from a full reset to `scripts/seed.py --if-empty --require-password`, so a restart keeps data and a hosted demo cannot use the published password.

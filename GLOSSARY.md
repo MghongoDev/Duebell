@@ -97,7 +97,7 @@ The route an approved reminder takes to the client: PayPal, email, or both. A re
 _Avoid_: Medium, transport
 
 **Mock mode**:
-A runtime mode that uses an in-memory PayPal adapter and a narrow demo parser, so the app runs with no credentials. The manual form still works.
+A runtime mode that uses the in-memory PayPal gateway, the narrow demo parser and the in-memory mailer, so the app runs with no credentials. The manual form still works.
 _Avoid_: Demo mode, fake mode
 
 **Live mode**:
@@ -115,3 +115,19 @@ _Avoid_: Live mode, production mode
 **Rule baseline**:
 The shipped risk scorer. It combines named features with fixed weights and returns reasons a human can check.
 _Avoid_: Heuristic, fallback model
+
+**Toolkit mode**:
+A runtime mode that sends, reminds, records payments and reads status through PayPal's Agent Toolkit. Creating invoices and checking webhooks stay on the sandbox REST calls.
+_Avoid_: Agent mode, AI mode
+
+**Risk comparison**:
+A logistic regression refit on one user's invoices with known outcomes, scored on held-out invoices beside the rule baseline. It informs; it never replaces the rule baseline.
+_Avoid_: Model, retrained score
+
+**Scope**:
+Whose records a query may see: one user's ID, or every user for the background scheduler. Every query must state one.
+_Avoid_: Tenant, filter
+
+**Demo user**:
+The account `demo@duebell.test` that the seed creates and gives the demo data to.
+_Avoid_: Admin, test user

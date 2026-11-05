@@ -2,17 +2,13 @@
 
 Duebell is a bell that rings when an invoice comes due.
 
-It is an invoice-to-cash agent for freelancers and small businesses. You describe a job in plain English. Duebell creates and sends a PayPal sandbox invoice, scores how likely the client is to pay late, and drafts a reminder in the right tone. You approve the reminder before PayPal sends it. When the client pays, a webhook or a refresh closes the loop, and the payment feeds the next score.
-
-This repository is a hackathon entry for the PayPal AI Hackathon. It runs in mock mode by default, so it works with no credentials.
+It helps freelancers and small businesses get paid. You describe a job in plain English. Duebell sends a PayPal invoice, scores how likely the client is to pay late, and drafts a reminder in a tone that fits. You approve each reminder before it goes out. When the client pays, a PayPal webhook or a refresh records it, and the payment feeds the next score.
 
 ![Duebell dashboard](docs/dashboard.png)
 
-## Status
-
-Hackathon entry for the PayPal AI Hackathon, November 2026. The full flow runs in mock mode. The sandbox adapter is wired but needs your PayPal app to have the Invoicing scope.
-
 ## Quick start
+
+You need Python 3.12 or later. Nothing else: the defaults need no PayPal account, model key or email server.
 
 ```bash
 python3 -m venv .venv
@@ -22,115 +18,65 @@ cp .env.example .env
 .venv/bin/uvicorn app.web:app --reload
 ```
 
-Open http://127.0.0.1:8000 and sign in as `demo@duebell.test` with password `duebell-demo-2026`. Set `DEMO_PASSWORD` before seeding to choose another.
+Open http://127.0.0.1:8000 and sign in as `demo@duebell.test` with `duebell-demo-2026`. Then follow [Your first invoice](docs/tutorials/first-invoice.md).
 
-Every account sees only its own clients, invoices, reminders, schedules and events. There is no public sign-up. Add a user from the command line:
+## What it does
 
-```bash
-.venv/bin/python scripts/create_user.py you@example.com
-```
+- A model turns your sentence into invoice fields. The manual form's checks validate them, and you confirm before anything is sent ([ADR 0004](docs/adr/0004-llm-as-form-filler.md)).
+- Each invoice gets a late-payment risk score with reasons you can check ([Risk scores](docs/explanation/risk-scores.md)).
+- Duebell drafts reminders for invoices that are overdue or due soon. You approve each one and pick PayPal, email, or both ([Approvals and sending](docs/explanation/approvals-and-sending.md)).
+- An invoice can repeat, or a High-risk one can be split into instalments. Every later invoice waits for your approval.
+- Signed PayPal webhooks and a manual refresh record payments.
+- Each user sees only their own records.
 
-`--claim` gives the new user every record with no owner, for a database created before sign-in existed.
+## How it fits together
 
-## Demo flow
+One FastAPI process over one SQLite file. PayPal sits behind a gateway with three modes: an in-memory mock, the sandbox REST API, and PayPal's Agent Toolkit. The model sits behind one parser function and can only fill a form. A background scheduler drafts reminders and refits the risk comparison; it never sends anything. See [Architecture](docs/explanation/architecture.md).
 
-1. Type a sentence such as `Invoice Acme Studio, billing@acme.test, 1200 USD for logo design, net 2 days.`
-2. Click `Fill fields with AI`, check the fields, then click `Create invoice`.
-3. Read the risk badge and its reasons.
-4. Click `Scan now`. Read the pending reminder.
-5. Click `Approve and send`.
-6. Click `Simulate payment`. The status and activity feed update.
+## Configuration
 
-An invoice can also repeat weekly or monthly, from the `Repeat` field. When the client scores High risk, the form offers to split the amount into two to six instalments. Either way, each later invoice waits in `Scheduled invoices` until you approve it.
+Three variables pick the modes. All default to `mock`.
 
-The seed script creates six clients with different payment habits, so the risk levels have something to work with. Seeded invoices never reached PayPal, so the scan drafts reminders only for invoices you create. Net 2 days puts the new invoice inside the reminder window.
+| Variable | Values |
+| --- | --- |
+| `PAYPAL_MODE` | `mock`, `sandbox`, `toolkit` |
+| `LLM_MODE` | `mock`, `live` |
+| `EMAIL_MODE` | `mock`, `smtp` |
 
-Step 2 works out of the box for the canonical sentence through the narrow mock parser. For free-form text, set `LLM_MODE=live` and a model endpoint. The manual form always works.
+Every other setting has a working default. [Configuration](docs/reference/configuration.md) lists them all. Before hosting, set `SECRET_KEY`, `COOKIE_SECURE=true` and your own `DEMO_PASSWORD`; see [Security](docs/explanation/security.md).
 
-## Modes
+## Status
 
-- `PAYPAL_MODE=mock` uses an in-memory PayPal adapter.
-- `PAYPAL_MODE=sandbox` calls the PayPal sandbox REST API.
-- `PAYPAL_MODE=toolkit` sends, reminds, records payments and reads status through PayPal's Agent Toolkit. Creating invoices and verifying webhooks stay on the REST path, because the toolkit cannot set payment terms and has no webhook check. Install it with `pip install -r requirements-toolkit.txt --no-deps`. The live check is pending while the sandbox Invoicing scope returns 403. See ADR 0006.
-- `LLM_MODE=mock` uses a narrow parser for the demo sentence and refuses anything else. The manual form and the reminder draft writer still work.
-- `LLM_MODE=live` calls an Anthropic-compatible endpoint.
-- `EMAIL_MODE=mock` keeps reminder emails in memory. `EMAIL_MODE=smtp` sends them through `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` and `SMTP_FROM`. When approving a reminder, pick PayPal, email, or both.
+A PayPal AI Hackathon entry, November 2026.
 
-## Evals
+- The full flow works in mock mode. Tests and the smoke run check it on every change.
+- Sandbox and toolkit modes are wired and tested offline. Live sandbox calls returned `403 NOT_AUTHORIZED` for Invoicing during development, so neither has been checked end to end against PayPal.
+- The last live parsing eval, on 3 November 2026, got 10 of 10 cases and 50 of 50 fields right.
+- The risk weights are set by hand. The training data is synthetic.
 
-The reminder and webhook evals run offline. The parse eval needs a live model.
+## Cost
 
-```bash
-.venv/bin/python scripts/evals.py
-LLM_MODE=live .venv/bin/python scripts/evals.py
-```
-
-Latest live run on 3 November 2026: parse 10 of 10 cases exact with 50 of 50 fields correct, reminders 10 of 10, webhook pass. Overall pass.
-
-## Resilience
-
-PayPal and model calls retry timeouts, transport errors, HTTP 429, and HTTP 5xx up to three times with exponential backoff. A final failure returns a clear error instead of leaving the UI spinning. Buttons show a working state, and failures appear in a banner.
-
-The smoke script runs three clean reset-to-demo cycles. Each cycle reseeds six clients and 26 invoices, scans for reminders, and confirms that every draft is pending and nothing was sent.
-
-```bash
-.venv/bin/python scripts/smoke.py
-```
-
-## Deploy
-
-`render.yaml` describes a small Render web service. It runs in mock mode, so the public demo needs no PayPal or model credentials. SQLite is ephemeral on the free plan, so the start command reseeds the demo and its user each time. Render generates `SECRET_KEY` and asks for `DEMO_PASSWORD` when you create the service.
-
-## Security and limits
-
-Duebell is a sandbox demo. Before hosting it, set `SECRET_KEY`, `COOKIE_SECURE=true` behind HTTPS, and a `DEMO_PASSWORD` of your own.
-
-- Every page and API route needs a signed-in user, except sign-in, the health check, static files and the PayPal webhook. A middleware denies by default, so a new route is protected without extra code.
-- Passwords are hashed with scrypt. The session is an HMAC-signed, HttpOnly, SameSite=Lax cookie that lasts 12 hours. Five failed sign-ins lock an email for 15 minutes.
-- Every record belongs to one user. A request for another user's record gets the same 404 as a missing one.
-- PayPal webhook signatures are verified before any state changes.
-- Events are deduplicated by PayPal event id.
-- Inputs are length-limited, amounts are capped, and currencies are allowlisted. Set `ALLOWED_CURRENCIES=USD,EUR` to invoice in more than one. Risk compares amounts only within a currency, and totals show one figure per currency.
-- Webhook payloads are capped at 1 MB.
-- Security headers and a content security policy are set on every response.
-- Secrets live in `.env`, which is ignored by git. `.env.example` lists the names.
-
-## Synthetic data
-
-The risk model trains on synthetic client histories. Duebell ships an explainable rule baseline, and a logistic-regression script compares its held-out result beside the baseline. The comparison is a demonstration, not a claim about real clients.
-
-The app also refits the comparison on its own history every six hours, or when you click `Refit now`. It uses only invoices with a known outcome (paid, or unpaid past due), and computes each one's features from the client's earlier invoices as of its issue date. Below 30 such invoices, or fewer than 5 late or 5 on time, the dashboard says there is not enough history instead of showing a number. The seeded demo sits below that line on purpose. The rule baseline stays the shipped score either way.
-
-```bash
-.venv/bin/python scripts/train_risk.py
-```
-
-## Sandbox setup
-
-Set `PAYPAL_MODE=sandbox`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, and `PAYPAL_INVOICER_EMAIL` in `.env`. The PayPal app needs the Invoicing scope.
-
-PayPal webhooks need a public HTTPS URL. Expose the app with a tunnel, then register the hook:
-
-```bash
-.venv/bin/python scripts/register_webhook.py --url https://your-tunnel.example/webhooks/paypal
-```
-
-Put the printed id in `PAYPAL_WEBHOOK_ID`. The mock gateway needs none of this.
-
-## Tests
-
-```bash
-.venv/bin/pytest -q
-```
+Mock mode costs nothing. The PayPal sandbox is free and moves no real money. The Render blueprint uses the free plan. Live mode pays your model provider for one short request each time you click **Fill fields with AI**.
 
 ## Documentation
 
-- `GLOSSARY.md`: domain terms.
-- `docs/adr/`: design decisions.
-- `docs/architecture.md`: how the pieces fit.
-- `docs/submission.md`: hackathon submission notes.
-- `docs/demo-script.md`: the recording plan.
+[docs/README.md](docs/README.md) is the map. It is split by what you need:
+
+| Folder | For |
+| --- | --- |
+| [docs/tutorials/](docs/tutorials/) | Learning Duebell by doing. |
+| [docs/how-to/](docs/how-to/) | Doing one task: email reminders, sandbox, deploy, users, troubleshooting. |
+| [docs/reference/](docs/reference/) | Looking up settings, commands, routes and tables. |
+| [docs/explanation/](docs/explanation/) | Understanding the design. |
+| [docs/adr/](docs/adr/README.md) | The decision records. |
+| [GLOSSARY.md](GLOSSARY.md) | The domain terms. Code and docs use them. |
+
+## Contributing
+
+Issues live on [GitHub](https://github.com/MghongoDev/Duebell/issues). Each piece of work is an issue; the triage labels are in [docs/agents/triage-labels.md](docs/agents/triage-labels.md).
+
+Before you commit, [run the checks](docs/how-to/run-checks.md). Each module docstring cites its issues and decision records. A new domain term goes in the glossary. A decision with a real trade-off gets a new record in `docs/adr/`.
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See [LICENSE](LICENSE).
