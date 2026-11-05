@@ -17,6 +17,7 @@ from app.models import Client, Invoice, Reminder, utcnow
 REMINDABLE_STATUSES = {"SENT", "OVERDUE"}
 BLOCKING_REMINDER_STATUSES = {"PENDING", "SENT"}
 MAX_DRAFT_CHARS = 2_000
+CHANNELS = ("paypal", "email")
 
 
 def money(cents: int) -> str:
@@ -108,17 +109,71 @@ def draft_reminders(
     return created
 
 
-def send_reminder(session: Session, reminder: Reminder, gateway) -> Reminder:
+def parse_channels(value) -> tuple[str, ...]:
+    """Normalise a channel choice: "paypal", "email", "both", or a list of them."""
+    if value is None or value == "":
+        return ("paypal",)
+    items = [value] if isinstance(value, str) else list(value)
+    chosen: list[str] = []
+    for item in items:
+        for part in str(item).split(","):
+            part = part.strip().lower()
+            names = CHANNELS if part == "both" else (part,)
+            for name in names:
+                if name not in CHANNELS:
+                    raise ValueError(f"Unknown reminder channel: {part}.")
+                if name not in chosen:
+                    chosen.append(name)
+    if not chosen:
+        raise ValueError("Pick at least one channel.")
+    return tuple(name for name in CHANNELS if name in chosen)
+
+
+def sent_channels(reminder: Reminder) -> list[str]:
+    return [name for name in (reminder.sent_channels or "").split(",") if name]
+
+
+def send_reminder(
+    session: Session,
+    reminder: Reminder,
+    gateway,
+    mailer=None,
+    channels=("paypal",),
+) -> Reminder:
+    """Send an approved draft. This is the only path out of the app (ADR 0003).
+
+    Each channel is recorded as soon as it succeeds. If a later channel fails,
+    the draft stays pending and a retry skips the channels already done, so
+    PayPal never sends the same reminder twice.
+    """
     if reminder.status != "PENDING":
         raise ValueError("Only a pending draft can be sent.")
+    channels = parse_channels(channels)
     invoice = session.get(Invoice, reminder.invoice_id)
-    if invoice is None or not invoice.paypal_invoice_id:
+    if invoice is None:
+        raise ValueError("This reminder has no invoice.")
+    if "paypal" in channels and not invoice.paypal_invoice_id:
         raise ValueError("This invoice has no PayPal id yet.")
-    gateway.send_reminder(
-        invoice.paypal_invoice_id,
-        f"Reminder: invoice {invoice.invoice_number}",
-        reminder.draft_text,
-    )
+    if "email" in channels and mailer is None:
+        raise ValueError("Email is not available.")
+
+    subject = f"Reminder: invoice {invoice.invoice_number}"
+    done = sent_channels(reminder)
+    for channel in channels:
+        if channel in done:
+            continue
+        if channel == "paypal":
+            gateway.send_reminder(invoice.paypal_invoice_id, subject, reminder.draft_text)
+        else:
+            client = session.get(Client, invoice.client_id)
+            if client is None:
+                raise ValueError("This invoice has no client email.")
+            mailer.send(client.email, subject, reminder.draft_text)
+        done.append(channel)
+        reminder.sent_channels = ",".join(name for name in CHANNELS if name in done)
+        session.add(reminder)
+        session.commit()
+
     reminder.status = "SENT"
     reminder.sent_at = utcnow()
     session.add(reminder)
@@ -175,6 +230,9 @@ def reminder_rows(session: Session) -> list[dict]:
                 "status": reminder.status,
                 "created_display": reminder.created_at.strftime("%d %b %H:%M"),
                 "sent_at": reminder.sent_at.isoformat(timespec="minutes") if reminder.sent_at else None,
+                "sent_at_display": reminder.sent_at.strftime("%d %b %H:%M") if reminder.sent_at else "",
+                "sent_channels": sent_channels(reminder),
+                "has_paypal_id": bool(invoice and invoice.paypal_invoice_id),
             }
         )
     return rows

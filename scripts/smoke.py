@@ -63,7 +63,10 @@ def one_cycle(settings) -> dict:
     check(len(pending) == 1, f"{len(pending)} pending drafts")
     check(gateway.sent_reminders == [], "a reminder was sent before approval")
     approved = client.post(f"/api/reminders/{pending[0]['id']}/approve").json()
-    check(approved == {"ok": True, "status": "SENT"}, f"approve returned {approved}")
+    check(
+        approved == {"ok": True, "status": "SENT", "sent_channels": ["paypal"]},
+        f"approve returned {approved}",
+    )
     check(len(gateway.sent_reminders) == 1, "approval did not reach PayPal once")
 
     paid = client.post(f"/api/invoices/{invoice.id}/simulate-payment").json()

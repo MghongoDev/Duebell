@@ -99,9 +99,24 @@
         <span class="status reminder-status-{{ reminder.status|lower }}">{{ reminder.status }}</span>
       </div>
       {% if reminder.status == 'PENDING' %}
+      {% if reminder.sent_channels %}
+      <p class="hint">Already sent via {{ reminder.sent_channels|join(' and ')|replace('paypal', 'PayPal') }}. Approving again sends only the rest.</p>
+      {% endif %}
       <textarea class="draft-edit" data-draft-id="{{ reminder.id }}" rows="6">{{ reminder.draft_text }}</textarea>
       <div class="row-actions">
         <button class="ghost small" data-reminder-action="save" data-id="{{ reminder.id }}">Save draft</button>
+        <label class="channel-pick">
+          <span class="sr-only">Send via</span>
+          <select data-channel-for="{{ reminder.id }}" aria-label="Send via">
+            {% if 'paypal' not in reminder.sent_channels %}
+            {% if reminder.has_paypal_id %}<option value="paypal">PayPal</option>{% endif %}
+            <option value="email">Email</option>
+            {% if reminder.has_paypal_id %}<option value="both">PayPal and email</option>{% endif %}
+            {% else %}
+            <option value="email">Email</option>
+            {% endif %}
+          </select>
+        </label>
         <button class="small" data-reminder-action="approve" data-id="{{ reminder.id }}">Approve and send</button>
         <button class="ghost small" data-reminder-action="reject" data-id="{{ reminder.id }}">Reject draft</button>
       </div>
@@ -147,7 +162,7 @@
 <section class="panel">
   <div class="panel-head">
     <h2>Activity</h2>
-    <p>What PayPal told the app.</p>
+    <p>PayPal events and sent reminders.</p>
   </div>
   {% if events %}
   <ul class="activity">
@@ -160,7 +175,7 @@
     {% endfor %}
   </ul>
   {% else %}
-  <div class="empty"><p>No PayPal events yet.</p></div>
+  <div class="empty"><p>No activity yet.</p></div>
   {% endif %}
 </section>
 
@@ -296,6 +311,15 @@ document.addEventListener("click", (event) => {
     const field = document.querySelector(`[data-draft-id="${id}"]`);
     const body = new URLSearchParams({ draft_text: field ? field.value : "" });
     runAction(button, "Saving...", `/api/reminders/${id}/edit`, {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    return;
+  }
+  if (action === "approve") {
+    const picker = document.querySelector(`[data-channel-for="${id}"]`);
+    const body = new URLSearchParams({ channel: picker ? picker.value : "paypal" });
+    runAction(button, "Sending...", `/api/reminders/${id}/approve`, {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body,
     });

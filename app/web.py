@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, Request
@@ -17,12 +18,15 @@ from app.jobs import start_scheduler, stop_scheduler
 from app.llm import LLMError, build_parser
 from app.models import Reminder, init_db, make_engine
 from app.paypal import PayPalError, build_gateway
+from app.mailer import MailError, build_mailer
 from app.reminders import (
     draft_reminders,
     edit_reminder,
+    parse_channels,
     reject_reminder,
     reminder_rows,
     send_reminder,
+    sent_channels,
 )
 from app.services import (
     create_invoice,
@@ -42,15 +46,37 @@ MAX_WEBHOOK_BYTES = 1_000_000
 MAX_PROMPT_CHARS = 2_000
 
 
-def _activity_rows(session: Session) -> list[dict]:
-    return [
+CHANNEL_LABELS = {"paypal": "PayPal", "email": "email"}
+
+
+def _activity_rows(session: Session, limit: int = 20) -> list[dict]:
+    rows = [
         {
             "event_id": event.paypal_event_id,
             "event_type": event.event_type,
-            "received_at": event.received_at.strftime("%d %b %H:%M"),
+            "at": event.received_at,
         }
-        for event in list_events(session)
+        for event in list_events(session, limit=limit)
     ]
+    for reminder in reminder_rows(session):
+        if reminder["status"] != "SENT" or not reminder["sent_at"]:
+            continue
+        via = " and ".join(CHANNEL_LABELS[name] for name in reminder["sent_channels"]) or "PayPal"
+        rows.append(
+            {
+                "event_id": reminder["invoice_number"],
+                "event_type": f"Reminder sent via {via}",
+                "at": datetime.fromisoformat(reminder["sent_at"]),
+            }
+        )
+    rows.sort(key=lambda row: _aware(row["at"]), reverse=True)
+    for row in rows:
+        row["received_at"] = row.pop("at").strftime("%d %b %H:%M")
+    return rows[:limit]
+
+
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 def _render_dashboard(
@@ -84,6 +110,7 @@ def create_app(
     gateway=None,
     llm=None,
     scheduler_enabled: bool = False,
+    mailer=None,
 ) -> FastAPI:
     settings = settings or get_settings()
     engine = engine or make_engine(settings.database_url)
@@ -102,6 +129,7 @@ def create_app(
     app.state.settings = settings
     app.state.engine = engine
     app.state.gateway = gateway
+    app.state.mailer = mailer or build_mailer(settings)
     app.state.llm = llm or build_parser(settings)
     app.state.scheduler_enabled = scheduler_enabled
     app.state.scheduler = None
@@ -224,7 +252,7 @@ def create_app(
         return reminder_rows(session)
 
     @app.post("/api/reminders/{reminder_id}/approve", response_class=JSONResponse)
-    def api_approve_reminder(
+    async def api_approve_reminder(
         reminder_id: int,
         request: Request,
         session: Session = Depends(get_session),
@@ -232,13 +260,28 @@ def create_app(
         reminder = session.get(Reminder, reminder_id)
         if reminder is None:
             return JSONResponse({"ok": False, "error": "Reminder not found."}, status_code=404)
+        form = await request.form()
         try:
-            send_reminder(session, reminder, request.app.state.gateway)
+            channels = parse_channels(form.getlist("channels") or form.get("channel"))
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
+        try:
+            send_reminder(
+                session,
+                reminder,
+                request.app.state.gateway,
+                request.app.state.mailer,
+                channels,
+            )
         except ValueError as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
-        except PayPalError as exc:
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
-        return {"ok": True, "status": reminder.status}
+        except (PayPalError, MailError) as exc:
+            session.refresh(reminder)
+            return JSONResponse(
+                {"ok": False, "error": str(exc), "sent_channels": sent_channels(reminder)},
+                status_code=502,
+            )
+        return {"ok": True, "status": reminder.status, "sent_channels": sent_channels(reminder)}
 
     @app.post("/api/reminders/{reminder_id}/edit", response_class=JSONResponse)
     async def api_edit_reminder(

@@ -43,6 +43,7 @@ Step 2 works out of the box for the canonical sentence through the narrow mock p
 - `PAYPAL_MODE=sandbox` calls the PayPal sandbox REST API.
 - `LLM_MODE=mock` uses a narrow parser for the demo sentence and refuses anything else. The manual form and the reminder draft writer still work.
 - `LLM_MODE=live` calls an Anthropic-compatible endpoint.
+- `EMAIL_MODE=mock` keeps reminder emails in memory. `EMAIL_MODE=smtp` sends them through `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` and `SMTP_FROM`. When approving a reminder, pick PayPal, email, or both.
 
 ## Evals
 

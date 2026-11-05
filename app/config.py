@@ -38,6 +38,14 @@ class Settings:
     reminder_window_days: int = 3
     paypal_timeout_seconds: float = 20.0
     llm_timeout_seconds: float = 30.0
+    email_mode: str = "mock"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+    smtp_timeout_seconds: float = 20.0
 
 
 @lru_cache(maxsize=1)
@@ -67,4 +75,12 @@ def get_settings() -> Settings:
         reminder_window_days=int(os.getenv("REMINDER_WINDOW_DAYS", "3")),
         paypal_timeout_seconds=float(os.getenv("PAYPAL_TIMEOUT_SECONDS", "20")),
         llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "30")),
+        email_mode=os.getenv("EMAIL_MODE", "mock").strip().lower(),
+        smtp_host=os.getenv("SMTP_HOST", "").strip(),
+        smtp_port=int(os.getenv("SMTP_PORT", "587")),
+        smtp_username=os.getenv("SMTP_USERNAME", "").strip(),
+        smtp_password=os.getenv("SMTP_PASSWORD", ""),
+        smtp_from=os.getenv("SMTP_FROM", "").strip(),
+        smtp_starttls=os.getenv("SMTP_STARTTLS", "true").strip().lower() not in {"0", "false", "no"},
+        smtp_timeout_seconds=float(os.getenv("SMTP_TIMEOUT_SECONDS", "20")),
     )

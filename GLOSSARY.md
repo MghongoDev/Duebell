@@ -45,7 +45,7 @@ A risk result for a client with too little history to score with confidence. It 
 _Avoid_: Cold-start score, default score
 
 **Reminder**:
-A message that asks a client to pay an unpaid invoice. Duebell drafts it; a human approves it before PayPal sends it.
+A message that asks a client to pay an unpaid invoice. Duebell drafts it; a human approves it and picks the channel: PayPal, email, or both.
 _Avoid_: Nudge, follow-up, chase
 
 **Scan**:
@@ -53,7 +53,7 @@ A pass that finds eligible invoices and creates pending reminder drafts. It neve
 _Avoid_: Batch, job, run
 
 **Approval**:
-A human decision that lets a drafted reminder leave the app. It is the only path to a PayPal send.
+A human decision that lets a drafted reminder leave the app. It is the only path to a PayPal or email send.
 _Avoid_: Confirmation, sign-off
 
 **Editing**:
@@ -75,6 +75,10 @@ _Avoid_: Deduplication, replay guard
 **Gateway**:
 The boundary that talks to PayPal. A mock gateway and a sandbox gateway implement the same interface.
 _Avoid_: Client, adapter, connector
+
+**Channel**:
+The route an approved reminder takes to the client: PayPal, email, or both. A reminder records each channel once it succeeds, so a retry never sends through the same channel twice.
+_Avoid_: Medium, transport
 
 **Mock mode**:
 A runtime mode that uses an in-memory PayPal adapter and a narrow demo parser, so the app runs with no credentials. The manual form still works.
