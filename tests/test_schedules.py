@@ -1,4 +1,4 @@
-"""Recurring invoices and payment plans (issue #25)."""
+"""Recurring invoices and instalment plans (issue #25)."""
 
 from datetime import datetime, timedelta, timezone
 
@@ -7,6 +7,7 @@ from sqlmodel import Session, select
 
 from app.models import Invoice, Schedule, ScheduledInvoice, utcnow
 from app.schedules import add_interval, split_amount
+from tests.conftest import add_late_payer
 
 FORM = {
     "client_name": "Acme Studio",
@@ -16,6 +17,15 @@ FORM = {
     "currency": "USD",
     "terms_days": "14",
 }
+
+
+def plan_form(client, **extra):
+    """Form fields for a High-risk client, the only kind the form may split."""
+    return dict(FORM, **add_late_payer(client), **extra)
+
+
+def instalment_invoices(session):
+    return [invoice for invoice in session.exec(select(Invoice)).all() if "instalment" in invoice.description]
 
 
 def items(client, **where):
@@ -78,9 +88,27 @@ def test_repeat_stops_after_its_cycles(client):
         move_due(client, upcoming.id)
         client.post("/api/reminders/scan")
     assert items(client, status="UPCOMING") == []
-    assert len(items(client, status="PENDING")) == 2
+    pending = items(client, status="PENDING")
+    assert len(pending) == 2
+    with Session(client.app.state.engine) as session:
+        # Still active: its last invoice waits for approval and can be cancelled.
+        assert session.exec(select(Schedule)).one().status == "ACTIVE"
+    for item in pending:
+        client.post(f"/api/scheduled/{item.id}/approve")
     with Session(client.app.state.engine) as session:
         assert session.exec(select(Schedule)).one().status == "DONE"
+
+
+def test_last_pending_repeat_can_still_be_cancelled(client):
+    client.post("/invoices", data=dict(FORM, repeat="MONTH", repeat_cycles="1"), follow_redirects=False)
+    [upcoming] = items(client)
+    move_due(client, upcoming.id)
+    client.post("/api/reminders/scan")
+    assert "every month" in client.get("/").text
+    with Session(client.app.state.engine) as session:
+        schedule_id = session.exec(select(Schedule)).one().id
+    assert client.post(f"/api/schedules/{schedule_id}/cancel").json()["status"] == "CANCELLED"
+    assert items(client)[0].status == "CANCELLED"
 
 
 def test_rejected_occurrence_skips_one_and_keeps_repeating(client):
@@ -107,10 +135,10 @@ def test_cancel_stops_future_drafts_and_leaves_sent_invoices(client):
 
 def test_instalment_plan_waits_for_approval_and_sums_exactly(client):
     response = client.post(
-        "/invoices", data=dict(FORM, amount="1000.00", instalments="3"), follow_redirects=False
+        "/invoices", data=plan_form(client, amount="1000.00", instalments="3"), follow_redirects=False
     )
     assert response.status_code == 303
-    assert client.get("/api/invoices").json() == [], "a plan sends nothing until approved"
+    assert client.app.state.gateway.invoices == {}, "a plan sends nothing until approved"
     plan = items(client)
     assert [item.amount_cents for item in plan] == [33_334, 33_333, 33_333]
     assert [item.status for item in plan] == ["PENDING", "UPCOMING", "UPCOMING"]
@@ -124,26 +152,25 @@ def test_instalment_plan_waits_for_approval_and_sums_exactly(client):
         client.post(f"/api/scheduled/{item.id}/approve")
 
     with Session(client.app.state.engine) as session:
-        invoices = session.exec(select(Invoice)).all()
+        invoices = instalment_invoices(session)
+        assert len(invoices) == 3
         assert sum(invoice.amount_cents for invoice in invoices) == 100_000
         assert all(invoice.paypal_invoice_id for invoice in invoices)
         assert session.exec(select(Schedule)).one().status == "DONE"
 
 
 def test_approved_instalment_gets_reminders_like_any_invoice(client):
-    client.post("/invoices", data=dict(FORM, instalments="2", terms_days="2"), follow_redirects=False)
+    client.post("/invoices", data=plan_form(client, instalments="2", terms_days="2"), follow_redirects=False)
     first = items(client)[0]
     client.post(f"/api/scheduled/{first.id}/approve")
     with Session(client.app.state.engine) as session:
-        invoice = session.exec(select(Invoice)).one()
-        invoice.risk_level = "HIGH"
-        session.add(invoice)
-        session.commit()
+        [invoice] = instalment_invoices(session)
+        assert invoice.risk_level == "HIGH"
     assert client.post("/api/reminders/scan").json()["created"] == 1
 
 
 def test_scheduled_invoice_cannot_be_approved_twice(client):
-    client.post("/invoices", data=dict(FORM, instalments="2"), follow_redirects=False)
+    client.post("/invoices", data=plan_form(client, instalments="2"), follow_redirects=False)
     first = items(client)[0]
     assert client.post(f"/api/scheduled/{first.id}/approve").status_code == 200
     assert client.post(f"/api/scheduled/{first.id}/approve").status_code == 409
@@ -190,8 +217,37 @@ def test_risk_preview_flags_a_late_payer_without_saving(client):
 
 
 def test_dashboard_lists_pending_and_active_schedules(client):
-    client.post("/invoices", data=dict(FORM, instalments="2"), follow_redirects=False)
+    client.post("/invoices", data=plan_form(client, instalments="2"), follow_redirects=False)
     page = client.get("/").text
     assert "Monthly retainer (instalment 1 of 2)" in page
     assert "in 2 parts, 0 sent" in page
     assert "Approve and send" in page
+
+
+def test_retry_after_a_failed_send_does_not_create_a_second_paypal_invoice(client):
+    from app.paypal import PayPalError
+
+    client.post("/invoices", data=plan_form(client, instalments="2"), follow_redirects=False)
+    first = items(client)[0]
+    gateway = client.app.state.gateway
+    real_send = gateway.send_invoice
+    gateway.send_invoice = lambda paypal_id: (_ for _ in ()).throw(PayPalError("PayPal is down."))
+
+    failed = client.post(f"/api/scheduled/{first.id}/approve")
+    assert failed.status_code == 502
+    assert len(gateway.invoices) == 1
+    assert items(client)[0].status == "PENDING"
+
+    gateway.send_invoice = real_send
+    retried = client.post(f"/api/scheduled/{first.id}/approve").json()
+    assert retried["status"] == "SENT"
+    assert len(gateway.invoices) == 1, "the retry must send the invoice PayPal already has"
+    rows = [row for row in client.get("/api/invoices").json() if "instalment" in row["description"]]
+    assert len(rows) == 1 and rows[0]["status"] == "SENT"
+
+
+def test_server_refuses_to_split_an_invoice_that_is_not_high_risk(client):
+    response = client.post("/invoices", data=dict(FORM, instalments="3"))
+    assert response.status_code == 422
+    assert "only for a High-risk invoice" in response.text
+    assert items(client) == []

@@ -39,7 +39,7 @@ def pending_reminder(client) -> int:
         invoice.due_at = utcnow() - timedelta(days=3)
         session.add(invoice)
         session.commit()
-        return draft_reminders(session, state.settings)[0].id
+        return draft_reminders(session, state.settings, scope=client.user_id)[0].id
 
 
 def approve(client, reminder_id, channel=None):
@@ -149,3 +149,13 @@ def test_old_database_gains_the_new_column(tmp_path):
     init_db(engine)
     with Session(engine) as session:
         assert session.get(Reminder, 1).sent_channels == ""
+
+
+def test_feed_keeps_a_paypal_send_even_if_the_draft_is_later_rejected(client):
+    reminder_id = pending_reminder(client)
+    client.app.state.mailer.fail_with = "The email could not be sent: SMTPServerDisconnected. Try again."
+    assert approve(client, reminder_id, "both").status_code == 502
+    assert client.post(f"/api/reminders/{reminder_id}/reject").json()["status"] == "REJECTED"
+    page = client.get("/").text
+    assert "Reminder sent via PayPal" in page
+    assert "Reminder sent via PayPal and email" not in page

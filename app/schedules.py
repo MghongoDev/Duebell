@@ -1,33 +1,95 @@
-"""Recurring invoices and instalment plans (issue #25).
+"""Recurring invoices and instalment plans (issues #24, #25; ADRs 0003, 0007, 0008).
 
 A schedule is the rule: repeat an invoice every interval, or split one amount
 into instalments. Each future invoice is a ScheduledInvoice. The scan moves due
-ones to PENDING, and only an operator's approval creates the PayPal invoice,
-through the same path as the form. The scheduler drafts; a person sends
-(ADR 0003).
+ones to PENDING, and only a user's approval creates the PayPal invoice, through
+the same path as the form. The scheduler drafts; a person sends.
 """
 
 from __future__ import annotations
 
 import calendar
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from sqlmodel import Session, select
 
 from app.config import Settings
-from app.models import Client, Schedule, ScheduledInvoice, utcnow
-from app.services import create_invoice
-from app.validation import InvoiceProposal
+from app.models import Client, Invoice, Schedule, ScheduledInvoice, as_utc, utcnow
+from app.ownership import Scope, owned
+from app.paypal import PayPalGateway
+from app.services import InvoiceNotSent, create_invoice, money, send_draft_invoice
+from app.validation import FieldError, InvoiceProposal
 
 INTERVAL_UNITS = ("WEEK", "MONTH")
 MIN_INSTALMENTS = 2
 MAX_INSTALMENTS = 6
 MAX_CYCLES = 60
+MAX_INTERVAL_COUNT = 12
+OPEN_STATUSES = ("UPCOMING", "PENDING")
 
 
-def _aware(value: datetime) -> datetime:
-    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+@dataclass(frozen=True)
+class ScheduleBasis:
+    """What every invoice a schedule produces has in common."""
+
+    user_id: int | None
+    client_id: int
+    description: str
+    amount_cents: int
+    currency: str
+    terms_days: int
+
+
+@dataclass(frozen=True)
+class ScheduleRequest:
+    """The optional repeat or instalment fields of the new invoice form."""
+
+    repeat: str | None = None
+    repeat_cycles: int | None = None
+    instalments: int = 0
+    instalment_interval: str = "MONTH"
+
+
+def parse_schedule_request(
+    repeat: str, repeat_cycles: str, instalments: str, instalment_interval: str
+) -> tuple[ScheduleRequest, list[FieldError]]:
+    """Read and check the form fields. All the limits live in this module."""
+    errors: list[FieldError] = []
+    repeat_unit = (repeat or "").strip().upper() or None
+    cycles = None
+    if repeat_unit:
+        if repeat_unit not in INTERVAL_UNITS:
+            errors.append(FieldError("repeat", "Repeat weekly or monthly, or leave it off."))
+        if (repeat_cycles or "").strip():
+            try:
+                cycles = int(repeat_cycles)
+            except ValueError:
+                cycles = 0
+            if not 1 <= cycles <= MAX_CYCLES:
+                errors.append(
+                    FieldError("repeat_cycles", f"Repeats must be a whole number from 1 to {MAX_CYCLES}.")
+                )
+    count = 0
+    interval = (instalment_interval or "MONTH").strip().upper()
+    if (instalments or "").strip() not in ("", "0"):
+        try:
+            count = int(instalments)
+        except ValueError:
+            count = -1
+        if not MIN_INSTALMENTS <= count <= MAX_INSTALMENTS:
+            errors.append(
+                FieldError("instalments", f"Choose between {MIN_INSTALMENTS} and {MAX_INSTALMENTS} instalments.")
+            )
+        if interval not in INTERVAL_UNITS:
+            errors.append(FieldError("instalment_interval", "Space instalments weekly or monthly."))
+    if repeat_unit and count:
+        errors.append(FieldError("repeat", "An invoice can repeat or be split into instalments, not both."))
+    request = ScheduleRequest(
+        repeat=repeat_unit, repeat_cycles=cycles, instalments=max(count, 0), instalment_interval=interval
+    )
+    return request, errors
 
 
 def add_interval(start: datetime, unit: str, count: int) -> datetime:
@@ -55,43 +117,45 @@ def split_amount(total_cents: int, parts: int) -> list[int]:
 def _check_interval(unit: str, count: int) -> None:
     if unit not in INTERVAL_UNITS:
         raise ValueError("Repeat weekly or monthly.")
-    if not 1 <= count <= 12:
-        raise ValueError("The interval must be between 1 and 12.")
+    if not 1 <= count <= MAX_INTERVAL_COUNT:
+        raise ValueError(f"The interval must be between 1 and {MAX_INTERVAL_COUNT}.")
 
 
-def create_recurring(
-    session: Session,
-    *,
-    client_id: int,
-    description: str,
-    amount_cents: int,
-    currency: str,
-    terms_days: int,
-    interval_unit: str,
-    interval_count: int = 1,
-    cycles: int | None = None,
-    first_issue: datetime,
-    user_id: int | None = None,
+def _new_schedule(
+    session: Session, basis: ScheduleBasis, kind: str, unit: str, count: int, cycles_left: int | None
 ) -> Schedule:
-    """Repeat an invoice. `first_issue` is the next one after the invoice just sent."""
-    _check_interval(interval_unit, interval_count)
-    if cycles is not None and not 1 <= cycles <= MAX_CYCLES:
-        raise ValueError(f"The number of repeats must be between 1 and {MAX_CYCLES}.")
+    _check_interval(unit, count)
     schedule = Schedule(
-        user_id=user_id,
-        kind="RECURRING",
-        client_id=client_id,
-        description=description,
-        amount_cents=amount_cents,
-        currency=currency,
-        terms_days=terms_days,
-        interval_unit=interval_unit,
-        interval_count=interval_count,
-        cycles_left=cycles,
+        user_id=basis.user_id,
+        kind=kind,
+        client_id=basis.client_id,
+        description=basis.description,
+        amount_cents=basis.amount_cents,
+        currency=basis.currency,
+        terms_days=basis.terms_days,
+        interval_unit=unit,
+        interval_count=count,
+        cycles_left=cycles_left,
     )
     session.add(schedule)
     session.commit()
     session.refresh(schedule)
+    return schedule
+
+
+def create_recurring(
+    session: Session,
+    basis: ScheduleBasis,
+    *,
+    interval_unit: str,
+    first_issue: datetime,
+    interval_count: int = 1,
+    cycles: int | None = None,
+) -> Schedule:
+    """Repeat an invoice. `first_issue` is the next one after the invoice just sent."""
+    if cycles is not None and not 1 <= cycles <= MAX_CYCLES:
+        raise ValueError(f"The number of repeats must be between 1 and {MAX_CYCLES}.")
+    schedule = _new_schedule(session, basis, "RECURRING", interval_unit, interval_count, cycles)
     _queue_next(session, schedule, first_issue, sequence=1)
     session.commit()
     return schedule
@@ -99,36 +163,17 @@ def create_recurring(
 
 def create_plan(
     session: Session,
+    basis: ScheduleBasis,
     *,
-    client_id: int,
-    description: str,
-    amount_cents: int,
-    currency: str,
-    terms_days: int,
     instalments: int,
     interval_unit: str = "MONTH",
     interval_count: int = 1,
     start: datetime | None = None,
-    user_id: int | None = None,
 ) -> Schedule:
-    _check_interval(interval_unit, interval_count)
-    amounts = split_amount(amount_cents, instalments)
-    start = _aware(start or utcnow())
-    schedule = Schedule(
-        user_id=user_id,
-        kind="INSTALMENT",
-        client_id=client_id,
-        description=description,
-        amount_cents=amount_cents,
-        currency=currency,
-        terms_days=terms_days,
-        interval_unit=interval_unit,
-        interval_count=interval_count,
-        cycles_left=0,
-    )
-    session.add(schedule)
-    session.commit()
-    session.refresh(schedule)
+    """Split one amount into instalments. Each waits for approval when due."""
+    amounts = split_amount(basis.amount_cents, instalments)
+    start = as_utc(start or utcnow())
+    schedule = _new_schedule(session, basis, "INSTALMENT", interval_unit, interval_count, 0)
     for index, cents in enumerate(amounts):
         session.add(
             ScheduledInvoice(
@@ -137,7 +182,7 @@ def create_plan(
                 sequence=index + 1,
                 amount_cents=cents,
                 issue_on=add_interval(start, interval_unit, interval_count * index),
-                description=f"{description} (instalment {index + 1} of {instalments})",
+                description=f"{basis.description} (instalment {index + 1} of {instalments})",
             )
         )
     session.commit()
@@ -149,8 +194,8 @@ def _queue_next(session: Session, schedule: Schedule, issue_on: datetime, sequen
         return
     if schedule.cycles_left is not None:
         if schedule.cycles_left <= 0:
-            schedule.status = "DONE"
-            session.add(schedule)
+            # Nothing more to queue. The schedule finishes once its last
+            # invoice is approved or skipped, so it stays cancellable until then.
             return
         schedule.cycles_left -= 1
         session.add(schedule)
@@ -166,18 +211,21 @@ def _queue_next(session: Session, schedule: Schedule, issue_on: datetime, sequen
     )
 
 
-def draft_scheduled(
-    session: Session, now: datetime | None = None, user_id: int | None = None
-) -> list[ScheduledInvoice]:
+def _open_items(session: Session, schedule: Schedule) -> list[ScheduledInvoice]:
+    query = select(ScheduledInvoice).where(
+        ScheduledInvoice.schedule_id == schedule.id,
+        ScheduledInvoice.status.in_(OPEN_STATUSES),
+    )
+    return list(session.exec(query).all())
+
+
+def draft_scheduled(session: Session, now: datetime | None = None, *, scope: Scope) -> list[ScheduledInvoice]:
     """Move due scheduled invoices to PENDING. Nothing reaches PayPal here."""
-    now = _aware(now or utcnow())
-    query = select(ScheduledInvoice).where(ScheduledInvoice.status == "UPCOMING")
-    if user_id is not None:
-        query = query.where(ScheduledInvoice.user_id == user_id)
-    due = session.exec(query).all()
+    now = as_utc(now or utcnow())
+    query = owned(select(ScheduledInvoice).where(ScheduledInvoice.status == "UPCOMING"), ScheduledInvoice, scope)
     drafted = []
-    for item in due:
-        if _aware(item.issue_on) > now:
+    for item in session.exec(query).all():
+        if as_utc(item.issue_on) > now:
             continue
         schedule = session.get(Schedule, item.schedule_id)
         if schedule is None or schedule.status == "CANCELLED":
@@ -186,14 +234,16 @@ def draft_scheduled(
         session.add(item)
         drafted.append(item)
         if schedule.kind == "RECURRING":
-            next_issue = add_interval(_aware(item.issue_on), schedule.interval_unit, schedule.interval_count)
+            next_issue = add_interval(as_utc(item.issue_on), schedule.interval_unit, schedule.interval_count)
             _queue_next(session, schedule, next_issue, item.sequence + 1)
     if drafted:
         session.commit()
     return drafted
 
 
-def approve_scheduled(session: Session, item: ScheduledInvoice, settings: Settings, gateway):
+def approve_scheduled(
+    session: Session, item: ScheduledInvoice, settings: Settings, gateway: PayPalGateway
+) -> Invoice:
     """Create and send the invoice through the normal path. The only way out."""
     if item.status != "PENDING":
         raise ValueError("Only a pending scheduled invoice can be approved.")
@@ -201,20 +251,30 @@ def approve_scheduled(session: Session, item: ScheduledInvoice, settings: Settin
     client = session.get(Client, schedule.client_id) if schedule else None
     if schedule is None or client is None:
         raise ValueError("This scheduled invoice has lost its client.")
-    proposal = InvoiceProposal(
-        client_name=client.name,
-        client_email=client.email,
-        description=item.description,
-        amount=Decimal(item.amount_cents) / 100,
-        currency=schedule.currency,
-        terms_days=schedule.terms_days,
-    )
-    invoice = create_invoice(session, proposal, settings, gateway, user_id=schedule.user_id)
+    try:
+        if item.invoice_id is not None:
+            # An earlier approval created the PayPal draft but could not send it.
+            invoice = send_draft_invoice(session, session.get(Invoice, item.invoice_id), gateway)
+        else:
+            proposal = InvoiceProposal(
+                client_name=client.name,
+                client_email=client.email,
+                description=item.description,
+                amount=Decimal(item.amount_cents) / 100,
+                currency=schedule.currency,
+                terms_days=schedule.terms_days,
+            )
+            invoice = create_invoice(session, proposal, settings, gateway, user_id=schedule.user_id)
+    except InvoiceNotSent as exc:
+        item.invoice_id = exc.invoice.id
+        session.add(item)
+        session.commit()
+        raise
     item.status = "SENT"
     item.invoice_id = invoice.id
     session.add(item)
     session.commit()
-    _finish_plan_if_done(session, schedule)
+    _finish_if_done(session, schedule)
     return invoice
 
 
@@ -226,7 +286,7 @@ def reject_scheduled(session: Session, item: ScheduledInvoice) -> ScheduledInvoi
     session.commit()
     schedule = session.get(Schedule, item.schedule_id)
     if schedule:
-        _finish_plan_if_done(session, schedule)
+        _finish_if_done(session, schedule)
     return item
 
 
@@ -234,13 +294,7 @@ def cancel_schedule(session: Session, schedule: Schedule) -> Schedule:
     """Stop future drafts. Invoices already sent are left alone."""
     schedule.status = "CANCELLED"
     session.add(schedule)
-    items = session.exec(
-        select(ScheduledInvoice).where(
-            ScheduledInvoice.schedule_id == schedule.id,
-            ScheduledInvoice.status.in_(("UPCOMING", "PENDING")),
-        )
-    ).all()
-    for item in items:
+    for item in _open_items(session, schedule):
         item.status = "CANCELLED"
         session.add(item)
     session.commit()
@@ -248,28 +302,22 @@ def cancel_schedule(session: Session, schedule: Schedule) -> Schedule:
     return schedule
 
 
-def _finish_plan_if_done(session: Session, schedule: Schedule) -> None:
-    if schedule.kind != "INSTALMENT" or schedule.status != "ACTIVE":
+def _finish_if_done(session: Session, schedule: Schedule) -> None:
+    """Mark a schedule DONE when it can produce nothing more and nothing is open."""
+    if schedule.status != "ACTIVE" or schedule.cycles_left != 0:
         return
-    open_items = session.exec(
-        select(ScheduledInvoice).where(
-            ScheduledInvoice.schedule_id == schedule.id,
-            ScheduledInvoice.status.in_(("UPCOMING", "PENDING")),
-        )
-    ).all()
-    if not open_items:
+    if not _open_items(session, schedule):
         schedule.status = "DONE"
         session.add(schedule)
         session.commit()
 
 
-def schedule_rows(session: Session, user_id: int | None = None) -> dict:
-    def mine(query, model):
-        return query if user_id is None else query.where(model.user_id == user_id)
-
-    clients = {client.id: client for client in session.exec(mine(select(Client), Client)).all()}
-    schedules = session.exec(mine(select(Schedule), Schedule).order_by(Schedule.id.desc())).all()
-    items = session.exec(mine(select(ScheduledInvoice), ScheduledInvoice).order_by(ScheduledInvoice.issue_on)).all()
+def schedule_rows(session: Session, scope: Scope) -> dict:
+    clients = {client.id: client for client in session.exec(owned(select(Client), Client, scope)).all()}
+    schedules = session.exec(owned(select(Schedule), Schedule, scope).order_by(Schedule.id.desc())).all()
+    items = session.exec(
+        owned(select(ScheduledInvoice), ScheduledInvoice, scope).order_by(ScheduledInvoice.issue_on)
+    ).all()
     by_schedule: dict[int, list[ScheduledInvoice]] = {}
     for item in items:
         by_schedule.setdefault(item.schedule_id, []).append(item)
@@ -286,9 +334,9 @@ def schedule_rows(session: Session, user_id: int | None = None) -> dict:
                         "id": item.id,
                         "client_name": name,
                         "description": item.description,
-                        "amount_display": f"{item.amount_cents / 100:,.2f}",
+                        "amount_display": money(item.amount_cents),
                         "currency": schedule.currency,
-                        "issue_display": _aware(item.issue_on).strftime("%d %b %Y"),
+                        "issue_display": as_utc(item.issue_on).strftime("%d %b %Y"),
                         "kind": schedule.kind,
                     }
                 )
@@ -303,10 +351,10 @@ def schedule_rows(session: Session, user_id: int | None = None) -> dict:
                     "kind": schedule.kind,
                     "client_name": name,
                     "description": schedule.description,
-                    "amount_display": f"{schedule.amount_cents / 100:,.2f}",
+                    "amount_display": money(schedule.amount_cents),
                     "currency": schedule.currency,
                     "every": every,
-                    "next_display": _aware(upcoming[0].issue_on).strftime("%d %b %Y") if upcoming else "",
+                    "next_display": as_utc(upcoming[0].issue_on).strftime("%d %b %Y") if upcoming else "",
                     "sent": sum(1 for item in own if item.status == "SENT"),
                     "total": len(own) if schedule.kind == "INSTALMENT" else None,
                 }

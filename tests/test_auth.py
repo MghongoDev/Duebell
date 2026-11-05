@@ -2,7 +2,6 @@
 
 import json
 import time
-from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,9 +16,9 @@ from app.auth import (
     make_session_cookie,
     read_session_cookie,
 )
-from app.models import Client, Event, Invoice, Reminder, Schedule, ScheduledInvoice, User, init_db, make_engine, utcnow
+from app.models import Client, Event, Invoice, Reminder, Schedule, ScheduledInvoice, User, init_db, make_engine
 from scripts.create_user import claim_ownerless
-from tests.conftest import PASSWORD, sign_in
+from tests.conftest import PASSWORD, add_late_payer, sign_in
 
 FORM = {
     "client_name": "Acme Studio",
@@ -126,10 +125,13 @@ def two_users(app):
 def alice_records(alice):
     """Give Alice one of everything: an invoice, a reminder, a schedule and a pending instalment."""
     assert alice.post("/invoices", data=dict(FORM, repeat="MONTH"), follow_redirects=False).status_code == 303
-    assert alice.post("/invoices", data=dict(FORM, instalments="2"), follow_redirects=False).status_code == 303
+    late = add_late_payer(alice)
+    assert alice.post("/invoices", data=dict(FORM, **late, instalments="2"), follow_redirects=False).status_code == 303
     engine = alice.app.state.engine
     with Session(engine) as session:
-        invoice = session.exec(select(Invoice).where(Invoice.user_id == alice.user_id)).first()
+        invoice = session.exec(
+            select(Invoice).where(Invoice.user_id == alice.user_id, Invoice.description == FORM["description"])
+        ).first()
         invoice.risk_level = "HIGH"
         session.add(invoice)
         session.commit()
@@ -151,7 +153,7 @@ def test_bob_sees_none_of_alices_records(two_users):
     assert "DUE-" not in page and "instalment 1 of 2" not in page
     assert "DUE-" in alice.get("/").text
     assert bob.post("/api/risk/preview", data=FORM).json()["reasons"][0].startswith("New client")
-    assert len(alice.get("/api/invoices").json()) == 1
+    assert len(alice.get("/api/invoices").json()) == 5  # four paid earlier plus the repeat
 
 
 @pytest.mark.parametrize(
@@ -252,3 +254,28 @@ def test_seed_belongs_to_the_demo_user(tmp_path):
         user = session.exec(select(User).where(User.email == DEMO_EMAIL)).one()
         owners = {invoice.user_id for invoice in session.exec(select(Invoice)).all()}
     assert owners == {user.id}
+
+
+def test_seed_if_empty_keeps_existing_data(tmp_path, monkeypatch):
+    from scripts.seed import seed_if_empty
+
+    monkeypatch.setenv("DEMO_PASSWORD", "a-hosted-password")
+    engine = make_engine(f"sqlite:///{tmp_path / 'host.db'}")
+    init_db(engine)
+    with Session(engine) as session:
+        assert seed_if_empty(session)["invoices"] == 26
+        session.add(User(email="real@duebell.test", password_hash="x"))
+        session.commit()
+        assert seed_if_empty(session) is None
+        assert len(session.exec(select(Invoice)).all()) == 26
+
+
+def test_hosted_seed_refuses_the_published_default_password(tmp_path, monkeypatch):
+    from scripts.seed import demo_user
+
+    monkeypatch.delenv("DEMO_PASSWORD", raising=False)
+    engine = make_engine(f"sqlite:///{tmp_path / 'host.db'}")
+    init_db(engine)
+    with Session(engine) as session:
+        with pytest.raises(SystemExit, match="DEMO_PASSWORD"):
+            demo_user(session, require_password=True)

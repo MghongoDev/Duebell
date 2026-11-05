@@ -1,4 +1,4 @@
-"""Sign-in, sessions and password hashing (issue #24).
+"""Sign-in, sessions and password hashing (issue #24, ADR 0008).
 
 Standard library only. Passwords use scrypt with a per-user salt. The session
 is an HMAC-signed cookie holding the user id and an expiry; the server keeps

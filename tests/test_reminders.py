@@ -62,7 +62,7 @@ def test_text_uses_only_invoice_facts():
 def test_scan_drafts_but_does_not_send(client):
     invoice_id = seed_invoice(client)
     with Session(client.app.state.engine) as session:
-        created = draft_reminders(session, client.app.state.settings)
+        created = draft_reminders(session, client.app.state.settings, scope=client.user_id)
         assert len(created) == 1
         assert created[0].invoice_id == invoice_id
         assert created[0].status == "PENDING"
@@ -72,8 +72,8 @@ def test_scan_drafts_but_does_not_send(client):
 def test_scan_does_not_duplicate_a_pending_draft(client):
     seed_invoice(client)
     with Session(client.app.state.engine) as session:
-        assert len(draft_reminders(session, client.app.state.settings)) == 1
-        assert len(draft_reminders(session, client.app.state.settings)) == 0
+        assert len(draft_reminders(session, client.app.state.settings, scope=client.user_id)) == 1
+        assert len(draft_reminders(session, client.app.state.settings, scope=client.user_id)) == 0
 
 
 def test_scan_skips_paid_invoices(client):
@@ -84,19 +84,19 @@ def test_scan_skips_paid_invoices(client):
         invoice.paid_at = utcnow()
         session.add(invoice)
         session.commit()
-        assert draft_reminders(session, client.app.state.settings) == []
+        assert draft_reminders(session, client.app.state.settings, scope=client.user_id) == []
 
 
 def test_scan_skips_far_future_low_risk(client):
     seed_invoice(client, due_days=30, risk="LOW")
     with Session(client.app.state.engine) as session:
-        assert draft_reminders(session, client.app.state.settings) == []
+        assert draft_reminders(session, client.app.state.settings, scope=client.user_id) == []
 
 
 def test_scan_drafts_due_soon_high_risk(client):
     seed_invoice(client, due_days=2, risk="HIGH")
     with Session(client.app.state.engine) as session:
-        assert len(draft_reminders(session, client.app.state.settings)) == 1
+        assert len(draft_reminders(session, client.app.state.settings, scope=client.user_id)) == 1
 
 
 def test_scan_skips_invoices_without_a_paypal_id(client):
@@ -106,13 +106,13 @@ def test_scan_skips_invoices_without_a_paypal_id(client):
         invoice.paypal_invoice_id = None
         session.add(invoice)
         session.commit()
-        assert draft_reminders(session, client.app.state.settings) == []
+        assert draft_reminders(session, client.app.state.settings, scope=client.user_id) == []
 
 
 def test_approval_sends_once(client):
     seed_invoice(client)
     with Session(client.app.state.engine) as session:
-        reminder = draft_reminders(session, client.app.state.settings)[0]
+        reminder = draft_reminders(session, client.app.state.settings, scope=client.user_id)[0]
         send_reminder(session, reminder, client.app.state.gateway)
         assert reminder.status == "SENT"
         assert len(client.app.state.gateway.sent_reminders) == 1
@@ -123,7 +123,7 @@ def test_approval_sends_once(client):
 def test_edit_changes_the_draft_without_sending(client):
     seed_invoice(client)
     with Session(client.app.state.engine) as session:
-        reminder = draft_reminders(session, client.app.state.settings)[0]
+        reminder = draft_reminders(session, client.app.state.settings, scope=client.user_id)[0]
         edit_reminder(session, reminder, "A shorter, warmer nudge.")
         assert reminder.status == "PENDING"
         assert reminder.draft_text == "A shorter, warmer nudge."
@@ -134,7 +134,7 @@ def test_edit_changes_the_draft_without_sending(client):
 def test_edit_refuses_an_empty_draft(client):
     seed_invoice(client)
     with Session(client.app.state.engine) as session:
-        reminder = draft_reminders(session, client.app.state.settings)[0]
+        reminder = draft_reminders(session, client.app.state.settings, scope=client.user_id)[0]
         with pytest.raises(ValueError, match="cannot be empty"):
             edit_reminder(session, reminder, "   ")
 
@@ -142,7 +142,7 @@ def test_edit_refuses_an_empty_draft(client):
 def test_reject_keeps_paypal_quiet(client):
     seed_invoice(client)
     with Session(client.app.state.engine) as session:
-        reminder = draft_reminders(session, client.app.state.settings)[0]
+        reminder = draft_reminders(session, client.app.state.settings, scope=client.user_id)[0]
         reject_reminder(session, reminder)
         assert reminder.status == "REJECTED"
     assert client.app.state.gateway.sent_reminders == []

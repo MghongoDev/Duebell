@@ -1,4 +1,4 @@
-"""Runtime settings for Duebell (issue #9)."""
+"""Runtime settings for Duebell (issues #9, #21, #24, #26)."""
 
 from __future__ import annotations
 

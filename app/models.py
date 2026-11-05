@@ -1,4 +1,9 @@
-"""Database models and engine setup for Duebell (issue #9)."""
+"""Database models and engine setup for Duebell (issues #9, #22, #24, #25, #26).
+
+Every table that holds a user's data has a user_id (ADR 0008). init_db adds
+columns and indexes a newer model declares to an older database, so a demo
+database keeps working across builds.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +17,13 @@ from sqlmodel import Field, SQLModel, create_engine
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def as_utc(value: datetime | None) -> datetime | None:
+    """Treat a naive datetime from storage as UTC, so it compares with utcnow()."""
+    if value is None or value.tzinfo:
+        return value
+    return value.replace(tzinfo=timezone.utc)
 
 
 class User(SQLModel, table=True):

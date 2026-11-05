@@ -1,4 +1,7 @@
-"""Invoice services for Duebell (issues #9, #11). See ADR 0005."""
+"""Invoice services for Duebell (issues #9, #11, #23, #24). See ADRs 0005 and 0008.
+
+Every read takes an ownership scope (app.ownership); creation records an owner.
+"""
 
 from __future__ import annotations
 
@@ -11,8 +14,9 @@ from sqlmodel import Session, select
 
 from app.config import Settings
 from app.models import Client, Event, Invoice, utcnow
-from app.paypal import PayPalError
-from app.risk import HistoryInvoice, score_invoice
+from app.ownership import Scope, get_owned, owned
+from app.paypal import PayPalError, PayPalGateway
+from app.risk import HistoryInvoice, RiskAssessment, score_invoice
 from app.validation import InvoiceProposal, proposal_to_cents
 
 PAID_STATUSES = {"PAID", "MARKED_AS_PAID"}
@@ -26,24 +30,31 @@ EVENT_STATUS = {
 }
 
 
-def owned(query, model, user_id: int | None):
-    """Filter a query to one user's rows. None means every user (scheduler only)."""
-    return query if user_id is None else query.where(model.user_id == user_id)
+def money(cents: int) -> str:
+    """Format cents for display, without a currency code."""
+    return f"{cents / 100:,.2f}"
 
 
-def get_owned(session: Session, model, record_id, user_id: int | None):
-    """Fetch a row only if it belongs to the user. Another user's row reads as missing."""
-    record = session.get(model, record_id)
-    if record is None or (user_id is not None and record.user_id != user_id):
-        return None
-    return record
-
-
-def get_or_create_client(session: Session, name: str, email: str, user_id: int | None = None) -> Client:
+def find_client(session: Session, email: str, user_id: int | None) -> Client | None:
+    """Look up one user's client by email without creating anything."""
     email = email.strip().lower()
-    client = session.exec(
-        select(Client).where(Client.email == email, Client.user_id == user_id)
-    ).first()
+    if not email:
+        return None
+    return session.exec(select(Client).where(Client.email == email, Client.user_id == user_id)).first()
+
+
+def preview_risk(
+    session: Session, user_id: int, *, email: str, amount_cents: int, terms_days: int, currency: str
+) -> RiskAssessment:
+    """Score an invoice that does not exist yet. Writes nothing."""
+    client = find_client(session, email, user_id)
+    history = client_history(session, client.id) if client else []
+    return score_invoice(amount_cents, terms_days, history, currency=currency.strip().upper())
+
+
+def get_or_create_client(session: Session, name: str, email: str, user_id: int | None) -> Client:
+    email = email.strip().lower()
+    client = find_client(session, email, user_id)
     if client:
         if name.strip() and client.name != name.strip():
             client.name = name.strip()
@@ -79,8 +90,9 @@ def create_invoice(
     session: Session,
     proposal: InvoiceProposal,
     settings: Settings,
-    gateway,
-    user_id: int | None = None,
+    gateway: PayPalGateway,
+    *,
+    user_id: int | None,
 ) -> Invoice:
     client = get_or_create_client(session, proposal.client_name, proposal.client_email, user_id)
     now = utcnow()
@@ -132,15 +144,30 @@ def create_invoice(
     invoice.paypal_invoice_id = paypal_id
     session.add(invoice)
     session.commit()
+    return send_draft_invoice(session, invoice, gateway)
 
+
+class InvoiceNotSent(PayPalError):
+    """PayPal holds the invoice as a draft, but sending it failed.
+
+    The caller keeps `invoice` and retries with send_draft_invoice, so a retry
+    never creates a second PayPal invoice.
+    """
+
+    def __init__(self, message: str, invoice: Invoice) -> None:
+        super().__init__(message)
+        self.invoice = invoice
+
+
+def send_draft_invoice(session: Session, invoice: Invoice, gateway) -> Invoice:
+    """Send an invoice PayPal already holds. Raises InvoiceNotSent on failure."""
+    if invoice.status != "DRAFT" or not invoice.paypal_invoice_id:
+        raise ValueError("Only a PayPal draft can be sent.")
     try:
-        gateway.send_invoice(paypal_id)
-    except PayPalError:
-        invoice.status = "DRAFT"
-        session.add(invoice)
-        session.commit()
-        raise
-
+        gateway.send_invoice(invoice.paypal_invoice_id)
+    except PayPalError as exc:
+        session.refresh(invoice)
+        raise InvoiceNotSent(str(exc), invoice) from exc
     invoice.status = "SENT"
     session.add(invoice)
     session.commit()
@@ -148,26 +175,26 @@ def create_invoice(
     return invoice
 
 
-def list_invoices(session: Session, user_id: int | None = None) -> list[Invoice]:
-    query = owned(select(Invoice), Invoice, user_id).order_by(Invoice.created_at.desc())
+def list_invoices(session: Session, scope: Scope) -> list[Invoice]:
+    query = owned(select(Invoice), Invoice, scope).order_by(Invoice.created_at.desc())
     return list(session.exec(query).all())
 
 
-def get_invoice(session: Session, invoice_id: int, user_id: int | None = None) -> Invoice | None:
+def get_invoice(session: Session, invoice_id: int, user_id: int) -> Invoice | None:
     return get_owned(session, Invoice, invoice_id, user_id)
 
 
-def client_map(session: Session, user_id: int | None = None) -> dict[int, Client]:
-    return {client.id: client for client in session.exec(owned(select(Client), Client, user_id)).all()}
+def client_map(session: Session, scope: Scope) -> dict[int, Client]:
+    return {client.id: client for client in session.exec(owned(select(Client), Client, scope)).all()}
 
 
-def invoice_rows(session: Session, user_id: int | None = None) -> list[dict]:
-    clients = client_map(session, user_id)
+def invoice_rows(session: Session, scope: Scope) -> list[dict]:
+    clients = client_map(session, scope)
     now = utcnow()
     rows = []
-    for invoice in list_invoices(session, user_id):
+    for invoice in list_invoices(session, scope):
         client = clients.get(invoice.client_id)
-        overdue = invoice.status not in {"PAID", "CANCELLED", "REFUNDED"} and invoice.due_at < now
+        overdue = invoice.status not in CLOSED_STATUSES and invoice.due_at < now
         rows.append(
             {
                 "id": invoice.id,
@@ -176,7 +203,7 @@ def invoice_rows(session: Session, user_id: int | None = None) -> list[dict]:
                 "client_email": client.email if client else "",
                 "description": invoice.description,
                 "amount_cents": invoice.amount_cents,
-                "amount_display": f"{invoice.amount_cents / 100:,.2f}",
+                "amount_display": money(invoice.amount_cents),
                 "currency": invoice.currency,
                 "terms_days": invoice.terms_days,
                 "issued_at": invoice.issued_at.isoformat(timespec="minutes"),
@@ -199,40 +226,34 @@ def dashboard_totals(rows: list[dict]) -> dict:
     # Outstanding money owed = invoices that have left draft and are not yet
     # settled. A DRAFT has never been sent, so it is not a debt to collect.
     # Amounts in different currencies are never added together.
-    outstanding = _sum_by_currency(
+    outstanding = _by_currency(
         row for row in rows if row["status"] == "SENT" and row.get("paypal_invoice_id")
     )
-    paid = _sum_by_currency(row for row in rows if row["status"] == "PAID")
+    paid = _by_currency(row for row in rows if row["status"] in PAID_STATUSES)
     overdue = sum(1 for row in rows if row["overdue"])
     return {
         "outstanding": outstanding,
         "paid": paid,
         "outstanding_display": _money_by_currency(outstanding),
         "overdue_count": overdue,
-        "overdue_by_currency": _count_by_currency(row for row in rows if row["overdue"]),
+        "overdue_by_currency": _by_currency((row for row in rows if row["overdue"]), count=True),
         "paid_display": _money_by_currency(paid),
         "invoice_count": len(rows),
     }
 
 
-def _sum_by_currency(rows) -> dict[str, int]:
+def _by_currency(rows, count: bool = False) -> dict[str, int]:
+    """Total amount_cents, or count rows, per currency. Never across currencies."""
     totals: dict[str, int] = {}
     for row in rows:
-        totals[row["currency"]] = totals.get(row["currency"], 0) + row["amount_cents"]
+        totals[row["currency"]] = totals.get(row["currency"], 0) + (1 if count else row["amount_cents"])
     return dict(sorted(totals.items()))
-
-
-def _count_by_currency(rows) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for row in rows:
-        counts[row["currency"]] = counts.get(row["currency"], 0) + 1
-    return dict(sorted(counts.items()))
 
 
 def _money_by_currency(totals: dict[str, int]) -> str:
     if not totals:
         return "0.00"
-    return " · ".join(f"{cents / 100:,.2f} {code}" for code, cents in totals.items())
+    return " · ".join(f"{money(cents)} {code}" for code, cents in totals.items())
 
 
 def new_invoice_number() -> str:
@@ -316,6 +337,6 @@ def handle_webhook(session: Session, gateway, headers: Mapping[str, str], body: 
     return {"ok": True, "applied": applied, "status": status}
 
 
-def list_events(session: Session, limit: int = 20, user_id: int | None = None) -> list[Event]:
-    query = owned(select(Event), Event, user_id).order_by(Event.received_at.desc()).limit(limit)
+def list_events(session: Session, scope: Scope, limit: int = 20) -> list[Event]:
+    query = owned(select(Event), Event, scope).order_by(Event.received_at.desc()).limit(limit)
     return list(session.exec(query).all())

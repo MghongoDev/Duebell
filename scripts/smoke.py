@@ -1,7 +1,7 @@
-"""Three clean reset-to-demo runs (issue #18).
+"""Three clean reset-to-demo runs (issues #18, #24).
 
 Each cycle resets and seeds a scratch database, then walks the demo through the
-HTTP routes with the mock adapters: parse the demo sentence, create the invoice,
+HTTP routes with the mock gateway and parser: parse the demo sentence, create the invoice,
 scan, approve the reminder, simulate payment, and replay the paid webhook. Run:
 
     .venv/bin/python scripts/smoke.py

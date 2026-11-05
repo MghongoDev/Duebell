@@ -1,4 +1,4 @@
-"""Reminder drafting, editing, approval, and rejection (issue #15).
+"""Reminder drafting, editing, approval, and rejection (issues #15, #24, #26; ADR 0003).
 
 Scanning only creates drafts. A human must edit or approve a draft before
 Duebell asks PayPal to send a reminder. The draft uses only facts already on
@@ -7,21 +7,37 @@ the invoice. See ADR 0003.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from enum import StrEnum
 
 from sqlmodel import Session, select
 
 from app.config import Settings
+from app.mailer import Mailer
 from app.models import Client, Invoice, Reminder, utcnow
+from app.ownership import Scope, owned
+from app.paypal import PayPalGateway, PayPalTimeout
+from app.services import money
 
 REMINDABLE_STATUSES = {"SENT", "OVERDUE"}
 BLOCKING_REMINDER_STATUSES = {"PENDING", "SENT"}
 MAX_DRAFT_CHARS = 2_000
-CHANNELS = ("paypal", "email")
 
 
-def money(cents: int) -> str:
-    return f"{cents / 100:,.2f}"
+class Channel(StrEnum):
+    """A route an approved reminder takes to the client (issue #26)."""
+
+    PAYPAL = "paypal"
+    EMAIL = "email"
+
+    @property
+    def label(self) -> str:
+        return "PayPal" if self is Channel.PAYPAL else "email"
+
+
+CHANNELS = tuple(Channel)
 
 
 def reminder_text(
@@ -86,13 +102,12 @@ def draft_reminders(
     session: Session,
     settings: Settings,
     now: datetime | None = None,
-    user_id: int | None = None,
+    *,
+    scope: Scope,
 ) -> list[Reminder]:
     blocked = _blocked_invoice_ids(session)
     created: list[Reminder] = []
-    query = select(Invoice).where(Invoice.status.in_(REMINDABLE_STATUSES))
-    if user_id is not None:
-        query = query.where(Invoice.user_id == user_id)
+    query = owned(select(Invoice).where(Invoice.status.in_(REMINDABLE_STATUSES)), Invoice, scope)
     for invoice in session.exec(query).all():
         if invoice.id in blocked or not is_due_for_reminder(invoice, settings, now):
             continue
@@ -119,37 +134,46 @@ def draft_reminders(
     return created
 
 
-def parse_channels(value) -> tuple[str, ...]:
+def parse_channels(value: str | Iterable[str] | None) -> tuple[Channel, ...]:
     """Normalise a channel choice: "paypal", "email", "both", or a list of them."""
     if value is None or value == "":
-        return ("paypal",)
+        return (Channel.PAYPAL,)
     items = [value] if isinstance(value, str) else list(value)
-    chosen: list[str] = []
+    chosen: set[Channel] = set()
     for item in items:
         for part in str(item).split(","):
             part = part.strip().lower()
-            names = CHANNELS if part == "both" else (part,)
-            for name in names:
-                if name not in CHANNELS:
-                    raise ValueError(f"Unknown reminder channel: {part}.")
-                if name not in chosen:
-                    chosen.append(name)
+            if part == "both":
+                chosen.update(CHANNELS)
+                continue
+            try:
+                chosen.add(Channel(part))
+            except ValueError:
+                raise ValueError(f"Unknown reminder channel: {part}.") from None
     if not chosen:
         raise ValueError("Pick at least one channel.")
-    return tuple(name for name in CHANNELS if name in chosen)
+    return tuple(channel for channel in CHANNELS if channel in chosen)
 
 
-def sent_channels(reminder: Reminder) -> list[str]:
-    return [name for name in (reminder.sent_channels or "").split(",") if name]
+def sent_channels(reminder: Reminder) -> list[Channel]:
+    """The channels that already delivered this reminder, in a fixed order."""
+    stored = {name for name in (reminder.sent_channels or "").split(",") if name}
+    return [channel for channel in CHANNELS if channel.value in stored]
+
+
+@dataclass
+class SendOutcome:
+    reminder: Reminder
+    warnings: list[str] = field(default_factory=list)
 
 
 def send_reminder(
     session: Session,
     reminder: Reminder,
-    gateway,
-    mailer=None,
-    channels=("paypal",),
-) -> Reminder:
+    gateway: PayPalGateway,
+    mailer: Mailer | None = None,
+    channels: str | Iterable[str] | None = (Channel.PAYPAL,),
+) -> SendOutcome:
     """Send an approved draft. This is the only path out of the app (ADR 0003).
 
     Each channel is recorded as soon as it succeeds. If a later channel fails,
@@ -162,25 +186,42 @@ def send_reminder(
     invoice = session.get(Invoice, reminder.invoice_id)
     if invoice is None:
         raise ValueError("This reminder has no invoice.")
-    if "paypal" in channels and not invoice.paypal_invoice_id:
+    if Channel.PAYPAL in channels and not invoice.paypal_invoice_id:
         raise ValueError("This invoice has no PayPal id yet.")
-    if "email" in channels and mailer is None:
+    if Channel.EMAIL in channels and mailer is None:
         raise ValueError("Email is not available.")
 
     subject = f"Reminder: invoice {invoice.invoice_number}"
+    warnings: list[str] = []
+
+    def via_paypal() -> None:
+        try:
+            gateway.send_reminder(invoice.paypal_invoice_id, subject, reminder.draft_text)
+        except PayPalTimeout:
+            # PayPal may still send it. Counting it as sent risks one missed
+            # reminder; retrying risks a duplicate to the client (ADR 0003).
+            warnings.append(
+                "PayPal did not confirm the reminder in time and may still send it. "
+                "Duebell counts it as sent so it never goes twice. Check PayPal."
+            )
+
+    def via_email() -> None:
+        client = session.get(Client, invoice.client_id)
+        if client is None:
+            raise ValueError("This invoice has no client email.")
+        mailer.send(client.email, subject, reminder.draft_text)
+
+    senders = {Channel.PAYPAL: via_paypal, Channel.EMAIL: via_email}
     done = sent_channels(reminder)
     for channel in channels:
         if channel in done:
             continue
-        if channel == "paypal":
-            gateway.send_reminder(invoice.paypal_invoice_id, subject, reminder.draft_text)
-        else:
-            client = session.get(Client, invoice.client_id)
-            if client is None:
-                raise ValueError("This invoice has no client email.")
-            mailer.send(client.email, subject, reminder.draft_text)
+        senders[channel]()
         done.append(channel)
-        reminder.sent_channels = ",".join(name for name in CHANNELS if name in done)
+        reminder.sent_channels = ",".join(channel.value for channel in CHANNELS if channel in done)
+        # When a channel last delivered. The status says whether every chosen
+        # channel has, so a partly sent draft still shows in the activity feed.
+        reminder.sent_at = utcnow()
         session.add(reminder)
         session.commit()
 
@@ -189,7 +230,7 @@ def send_reminder(
     session.add(reminder)
     session.commit()
     session.refresh(reminder)
-    return reminder
+    return SendOutcome(reminder, warnings)
 
 
 def edit_reminder(session: Session, reminder: Reminder, text: str) -> Reminder:
@@ -218,13 +259,10 @@ def reject_reminder(session: Session, reminder: Reminder) -> Reminder:
     return reminder
 
 
-def reminder_rows(session: Session, user_id: int | None = None) -> list[dict]:
-    def mine(query, model):
-        return query if user_id is None else query.where(model.user_id == user_id)
-
-    reminders = session.exec(mine(select(Reminder), Reminder).order_by(Reminder.created_at.desc())).all()
-    invoices = {invoice.id: invoice for invoice in session.exec(mine(select(Invoice), Invoice)).all()}
-    clients = {client.id: client for client in session.exec(mine(select(Client), Client)).all()}
+def reminder_rows(session: Session, scope: Scope) -> list[dict]:
+    reminders = session.exec(owned(select(Reminder), Reminder, scope).order_by(Reminder.created_at.desc())).all()
+    invoices = {invoice.id: invoice for invoice in session.exec(owned(select(Invoice), Invoice, scope)).all()}
+    clients = {client.id: client for client in session.exec(owned(select(Client), Client, scope)).all()}
     rows = []
     for reminder in reminders:
         invoice = invoices.get(reminder.invoice_id)

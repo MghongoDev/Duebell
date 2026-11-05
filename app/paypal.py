@@ -1,7 +1,7 @@
 """PayPal gateway for Duebell (issues #10, #11, #21).
 
-The app talks to one protocol. A mock adapter keeps the demo offline, a
-sandbox adapter calls PayPal's Invoicing v2 REST API, and a toolkit adapter
+The app talks to one protocol. The mock gateway keeps the demo offline, the
+sandbox gateway calls PayPal's Invoicing v2 REST API, and the toolkit gateway
 routes most calls through PayPal's Agent Toolkit. See ADRs 0001 and 0006.
 """
 
@@ -23,6 +23,14 @@ from app.retry import RetryableFailure, call_with_retries
 
 class PayPalError(RuntimeError):
     pass
+
+
+class PayPalTimeout(PayPalError):
+    """PayPal did not answer in time, and the call may still complete.
+
+    The toolkit's HTTP call keeps running in its worker thread after the app
+    stops waiting, so the caller must not assume the action failed.
+    """
 
 
 def term_type(days: int) -> str:
@@ -292,7 +300,7 @@ class ToolkitPayPal(SandboxPayPal):
         try:
             result = future.result(timeout=self.settings.paypal_timeout_seconds)
         except FutureTimeout as exc:
-            raise PayPalError(
+            raise PayPalTimeout(
                 f"PayPal did not answer within {self.settings.paypal_timeout_seconds:g} seconds. Try again."
             ) from exc
         except Exception as exc:  # the toolkit raises requests, pydantic and plain errors

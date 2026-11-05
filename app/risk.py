@@ -1,4 +1,4 @@
-"""Late-payment risk baseline for Duebell (issue #12).
+"""Late-payment risk baseline for Duebell (issues #12, #23).
 
 The shipped scorer is a rule baseline. It returns a score, a level, and
 reasons a human can check. A separate training script compares a logistic
@@ -69,7 +69,8 @@ def extract_features(
         "terms_days": terms_days,
         "new_client": prior_count == 0,
         "new_currency": prior_count > 0 and not priced,
-        "limited_data": prior_count < LIMITED_DATA_BELOW,
+        # A first invoice in a new currency has no amount history to compare.
+        "limited_data": prior_count < LIMITED_DATA_BELOW or (prior_count > 0 and not priced),
     }
 
 
@@ -128,7 +129,7 @@ def score_invoice(
         score += 0.04
         reasons.append(f"Net {terms_days} terms are longer than 30 days.")
 
-    if features["limited_data"] and not features["new_client"]:
+    if features["limited_data"] and not features["new_client"] and not features["new_currency"]:
         reasons.append("Limited history. Two or more paid invoices would sharpen this score.")
 
     score = round(max(0.0, min(1.0, score)), 2)

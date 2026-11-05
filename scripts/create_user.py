@@ -1,6 +1,6 @@
 """Add a Duebell user from the command line (issue #24).
 
-There is no public sign-up. An operator adds each user here:
+There is no public sign-up. Whoever runs the server adds each user here:
 
     .venv/bin/python scripts/create_user.py you@example.com
     .venv/bin/python scripts/create_user.py you@example.com --claim
@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sqlmodel import Session, SQLModel, select
+from sqlmodel import Session, SQLModel
 
 from app.auth import AuthError, create_user
 from app.config import get_settings

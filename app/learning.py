@@ -1,8 +1,8 @@
-"""Refit the risk comparison on the app's own payment history (issue #22).
+"""Refit the risk comparison on the app's own payment history (issue #22, ADRs 0002, 0008).
 
 The rule baseline stays the shipped score (ADR 0002). This module fits a
 logistic regression on invoices whose outcome is known and stores a held-out
-comparison beside the baseline, so the operator can see whether real history
+comparison beside the baseline, so the user can see whether real history
 says anything the hand-tuned weights miss.
 
 Each invoice becomes one row. Its features are computed as of its issue date
@@ -12,34 +12,29 @@ that had not happened yet.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlmodel import Session, select
 
-from app.models import Invoice, RiskComparison, utcnow
+from app.models import Invoice, RiskComparison, as_utc, utcnow
+from app.ownership import EVERY_USER, Scope, check_scope, owned
 from app.risk import HIGH_FROM, HistoryInvoice, extract_features, score_invoice
+from app.services import PAID_STATUSES
 
 FEATURES = ["late_share", "average_days_late", "amount_ratio", "terms_days", "new_client"]
 MIN_ROWS = 30
 MIN_PER_CLASS = 5
 TEST_SHARE = 0.25
-SETTLED = {"PAID"}
 SKIPPED = {"DRAFT", "CANCELLED"}
-
-
-def _aware(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 def outcome(invoice: Invoice, now: datetime) -> int | None:
     """1 if paid late or unpaid past due, 0 if paid on time, None if unknown."""
     if invoice.status in SKIPPED:
         return None
-    due = _aware(invoice.due_at)
-    paid = _aware(invoice.paid_at)
-    if invoice.status in SETTLED and paid is not None:
+    due = as_utc(invoice.due_at)
+    paid = as_utc(invoice.paid_at)
+    if invoice.status in PAID_STATUSES and paid is not None:
         return 1 if (paid - due).days > 0 else 0
     if paid is None and due < now:
         return 1
@@ -49,13 +44,13 @@ def outcome(invoice: Invoice, now: datetime) -> int | None:
 def _history_as_of(invoices: list[Invoice], as_of: datetime) -> list[HistoryInvoice]:
     history = []
     for item in invoices:
-        if item.status in SKIPPED or _aware(item.issued_at) >= as_of:
+        if item.status in SKIPPED or as_utc(item.issued_at) >= as_of:
             continue
-        paid = _aware(item.paid_at)
+        paid = as_utc(item.paid_at)
         history.append(
             HistoryInvoice(
                 amount_cents=item.amount_cents,
-                due_at=_aware(item.due_at),
+                due_at=as_utc(item.due_at),
                 paid_at=paid if paid is not None and paid <= as_of else None,
                 currency=item.currency,
             )
@@ -63,10 +58,9 @@ def _history_as_of(invoices: list[Invoice], as_of: datetime) -> list[HistoryInvo
     return history
 
 
-def training_rows(session: Session, now: datetime | None = None, user_id: int | None = None) -> list[dict]:
-    now = _aware(now) or utcnow()
-    query = select(Invoice) if user_id is None else select(Invoice).where(Invoice.user_id == user_id)
-    invoices = list(session.exec(query).all())
+def training_rows(session: Session, now: datetime | None = None, *, scope: Scope) -> list[dict]:
+    now = as_utc(now or utcnow())
+    invoices = list(session.exec(owned(select(Invoice), Invoice, scope)).all())
     by_client: dict[int, list[Invoice]] = {}
     for invoice in invoices:
         by_client.setdefault(invoice.client_id, []).append(invoice)
@@ -76,7 +70,7 @@ def training_rows(session: Session, now: datetime | None = None, user_id: int | 
         label = outcome(invoice, now)
         if label is None:
             continue
-        as_of = _aware(invoice.issued_at)
+        as_of = as_utc(invoice.issued_at)
         history = _history_as_of(by_client[invoice.client_id], as_of)
         features = extract_features(
             invoice.amount_cents, invoice.terms_days, history, now=as_of, currency=invoice.currency
@@ -91,9 +85,12 @@ def training_rows(session: Session, now: datetime | None = None, user_id: int | 
     return rows
 
 
-def refit(session: Session, now: datetime | None = None, user_id: int | None = None) -> RiskComparison:
+def refit(session: Session, now: datetime | None = None, *, user_id: int) -> RiskComparison:
     """Refit on one user's invoices. Users never train on each other's clients."""
-    rows = training_rows(session, now, user_id)
+    check_scope(user_id)
+    if user_id is EVERY_USER:
+        raise TypeError("A refit trains on one user's invoices, never on everyone's.")
+    rows = training_rows(session, now, scope=user_id)
     late = sum(row["late"] for row in rows)
     on_time = len(rows) - late
     result = RiskComparison(user_id=user_id, rows_used=len(rows), late_count=late)
@@ -139,8 +136,6 @@ def _fit(rows: list[dict], result: RiskComparison) -> None:
     )
 
 
-def latest_comparison(session: Session, user_id: int | None = None) -> RiskComparison | None:
-    query = select(RiskComparison)
-    if user_id is not None:
-        query = query.where(RiskComparison.user_id == user_id)
+def latest_comparison(session: Session, user_id: int) -> RiskComparison | None:
+    query = owned(select(RiskComparison), RiskComparison, user_id)
     return session.exec(query.order_by(RiskComparison.id.desc()).limit(1)).first()

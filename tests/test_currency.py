@@ -86,3 +86,29 @@ def test_currency_off_the_list_is_still_rejected(client):
     response = client.post("/invoices", data=dict(FORM, currency="GBP"))
     assert response.status_code == 422
     assert "Currency must be one of: USD, EUR" in response.text
+
+
+def test_marked_as_paid_is_collected_and_never_overdue(client):
+    from sqlmodel import Session
+
+    from app.models import Invoice
+
+    client.post("/invoices", data=FORM, follow_redirects=False)
+    with Session(client.app.state.engine) as session:
+        invoice = session.exec(__import__("sqlmodel").select(Invoice)).one()
+        invoice.status = "MARKED_AS_PAID"
+        invoice.paid_at = utcnow()
+        invoice.due_at = utcnow() - timedelta(days=5)
+        session.add(invoice)
+        session.commit()
+    [row] = client.get("/api/invoices").json()
+    assert row["overdue"] is False
+    totals = dashboard_totals([row])
+    assert totals["paid"] == {"USD": 100_000}
+    assert totals["overdue_count"] == 0
+
+
+def test_first_invoice_in_a_new_currency_is_flagged_limited_data():
+    history = [paid_on_time(100_000, "USD"), paid_on_time(100_000, "USD"), paid_on_time(100_000, "USD")]
+    assert score_invoice(100_000, 14, history, currency="USD").limited_data is False
+    assert score_invoice(100_000, 14, history, currency="EUR").limited_data is True

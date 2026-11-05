@@ -258,6 +258,7 @@ def run_webhook_eval(settings: Settings) -> bool:
             ),
             settings,
             gateway,
+            user_id=None,  # an offline eval database has no users
         )
         body = json.dumps(
             {

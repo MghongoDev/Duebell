@@ -375,6 +375,7 @@ async function runAction(button, label, path, options = {}) {
       button.textContent = original;
       return;
     }
+    if (data.warning) window.alert(data.warning);
     window.location.reload();
   } catch (error) {
     showError("Could not reach the server. Check your connection and try again.");

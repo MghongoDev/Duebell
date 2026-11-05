@@ -1,8 +1,8 @@
 """Email gateway for reminders (issue #26).
 
 Email is a second reminder channel beside PayPal. Like the PayPal gateway
-(ADR 0001), it is a small protocol with a mock adapter that keeps the demo free
-of credentials and an SMTP adapter for real mail. Only an approved reminder
+(ADR 0001), it is a small protocol with a mock mailer that keeps the demo free
+of credentials and an SMTP mailer for real mail. Only an approved reminder
 reaches it (ADR 0003).
 """
 
@@ -16,7 +16,7 @@ from app.config import Settings
 
 
 class MailError(RuntimeError):
-    """A send that failed, with a message an operator can read."""
+    """A send that failed, with a message the user can read."""
 
 
 class Mailer(Protocol):

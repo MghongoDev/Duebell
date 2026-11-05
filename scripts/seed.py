@@ -1,4 +1,9 @@
-"""Seed synthetic clients and invoices for the Duebell demo (issue #13)."""
+"""Seed synthetic clients and invoices for the Duebell demo (issues #13, #24).
+
+The seed belongs to a demo user. --if-empty seeds only a database with no
+users, and --require-password refuses the published default password, which
+is how a hosted instance starts.
+"""
 
 from __future__ import annotations
 
@@ -47,12 +52,28 @@ DEMO_EMAIL = "demo@duebell.test"
 DEFAULT_DEMO_PASSWORD = "duebell-demo-2026"
 
 
-def demo_user(session: Session) -> User:
-    """The demo account. Set DEMO_PASSWORD before hosting anywhere public."""
+def demo_user(session: Session, require_password: bool = False) -> User:
+    """The demo account. A hosted instance must set DEMO_PASSWORD.
+
+    The default password is published in the README, so require_password
+    refuses to fall back to it.
+    """
     user = session.exec(select(User).where(User.email == DEMO_EMAIL)).first()
     if user:
         return user
-    return create_user(session, DEMO_EMAIL, os.getenv("DEMO_PASSWORD", DEFAULT_DEMO_PASSWORD))
+    password = os.getenv("DEMO_PASSWORD", "")
+    if not password:
+        if require_password:
+            raise SystemExit("Set DEMO_PASSWORD. A hosted demo must not use the published default.")
+        password = DEFAULT_DEMO_PASSWORD
+    return create_user(session, DEMO_EMAIL, password)
+
+
+def seed_if_empty(session: Session, require_password: bool = False) -> dict | None:
+    """Seed only a database with no users, so a restart never wipes real data."""
+    if session.exec(select(User)).first() is not None:
+        return None
+    return seed(session, demo_user(session, require_password).id)
 
 
 def seed(session: Session, user_id: int | None = None) -> dict:
@@ -124,6 +145,10 @@ def seed(session: Session, user_id: int | None = None) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed the Duebell demo database.")
     parser.add_argument("--reset", action="store_true", help="Delete the database first.")
+    parser.add_argument("--if-empty", action="store_true", help="Seed only if the database has no users.")
+    parser.add_argument(
+        "--require-password", action="store_true", help="Refuse to use the default demo password."
+    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -132,7 +157,13 @@ def main() -> None:
     engine = make_engine(settings.database_url)
     init_db(engine)
     with Session(engine) as session:
-        summary = seed(session)
+        if args.if_empty:
+            summary = seed_if_empty(session, args.require_password)
+            if summary is None:
+                print("The database already has users. Nothing seeded.")
+                return
+        else:
+            summary = seed(session, demo_user(session, args.require_password).id)
     print(f"Seeded {summary['clients']} clients and {summary['invoices']} invoices.")
     print(f"Sign in as {DEMO_EMAIL}. The password is DEMO_PASSWORD, or {DEFAULT_DEMO_PASSWORD} if unset.")
     print("Training data is synthetic. The risk model is a demonstration, not a validated predictor.")

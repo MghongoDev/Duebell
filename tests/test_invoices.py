@@ -40,6 +40,7 @@ def test_create_sends_through_gateway(client):
 
 def test_paypal_failure_is_readable(settings):
     from fastapi.testclient import TestClient
+
     from app.models import make_engine
     from app.web import create_app
 
@@ -95,6 +96,7 @@ def test_dashboard_includes_grid_and_ai_panels(client):
 
 def test_send_failure_keeps_draft_with_paypal_id(settings):
     from fastapi.testclient import TestClient
+
     from app.models import make_engine
     from app.web import create_app
 

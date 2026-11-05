@@ -4,8 +4,10 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    # The free plan's disk is ephemeral, so each start reseeds the demo and its user.
-    startCommand: python scripts/reset_demo.py && uvicorn app.web:app --host 0.0.0.0 --port $PORT
+    # Seeds the demo only when the database has no users, so a restart on a
+    # persistent disk keeps everyone's data. The free plan's disk is wiped on
+    # each deploy anyway. A hosted demo must set its own DEMO_PASSWORD.
+    startCommand: python scripts/seed.py --if-empty --require-password && uvicorn app.web:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION

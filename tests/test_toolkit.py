@@ -1,8 +1,8 @@
-"""Agent Toolkit gateway adapter (issue #21).
+"""Agent Toolkit gateway (issue #21).
 
 A fake toolkit stands in for paypal_agent_toolkit, so these tests need neither
 the package nor a network. The fake records each (method, params) pair the
-adapter hands to PayPalAPI.run.
+gateway hands to PayPalAPI.run.
 """
 
 import json
@@ -146,3 +146,30 @@ def test_demo_flow_in_toolkit_mode():
     assert refreshed == {"ok": True, "status": "PAID"}
     methods = [method for method, _ in toolkit.calls]
     assert methods == ["send_invoice", "send_invoice_reminder", "get_invoice"]
+
+
+def test_a_timed_out_reminder_is_not_sent_twice():
+    """The toolkit call keeps running after the timeout, so PayPal may still send it."""
+    toolkit = FakeToolkit()
+    gw = gateway(toolkit, paypal_timeout_seconds=2.0)
+    s = settings()
+    app = create_app(settings=s, engine=make_engine(s.database_url), gateway=gw)
+    client = sign_in(TestClient(app))
+    form = {"client_name": "Acme Studio", "client_email": "billing@acme.test", "description": "Logo design",
+            "amount": "1200.00", "currency": "USD", "terms_days": "2"}
+    client.post("/invoices", data=form, follow_redirects=False)
+    client.post("/api/reminders/scan")
+    reminder = client.get("/api/reminders").json()[0]
+
+    gw.settings = settings(paypal_timeout_seconds=0.05)
+    toolkit.delay = 0.3
+    first = client.post(f"/api/reminders/{reminder['id']}/approve").json()
+    assert first["ok"] is True
+    assert first["status"] == "SENT"
+    assert "did not confirm" in first["warning"]
+
+    sends = [method for method, _ in toolkit.calls if method == "send_invoice_reminder"]
+    assert len(sends) == 1
+    again = client.post(f"/api/reminders/{reminder['id']}/approve")
+    assert again.status_code == 409
+    assert len([m for m, _ in toolkit.calls if m == "send_invoice_reminder"]) == 1
