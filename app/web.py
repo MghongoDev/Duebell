@@ -18,6 +18,7 @@ from app.jobs import start_scheduler, stop_scheduler
 from app.llm import LLMError, build_parser
 from app.models import Reminder, init_db, make_engine
 from app.paypal import PayPalError, build_gateway
+from app.learning import latest_comparison, refit
 from app.mailer import MailError, build_mailer
 from app.reminders import (
     draft_reminders,
@@ -99,6 +100,7 @@ def _render_dashboard(
             "errors": errors or [],
             "form": form or {},
             "currencies": request.app.state.settings.allowed_currencies,
+            "comparison": latest_comparison(session),
         },
         status_code=status_code,
     )
@@ -314,6 +316,16 @@ def create_app(
         except ValueError as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
         return {"ok": True, "status": reminder.status}
+
+    @app.post("/api/risk/refit", response_class=JSONResponse)
+    def api_risk_refit(session: Session = Depends(get_session)):
+        result = refit(session)
+        return {"ok": True, "comparison": result.model_dump(mode="json")}
+
+    @app.get("/api/risk/comparison", response_class=JSONResponse)
+    def api_risk_comparison(session: Session = Depends(get_session)):
+        result = latest_comparison(session)
+        return {"ok": True, "comparison": result.model_dump(mode="json") if result else None}
 
     @app.get("/api/invoices", response_class=JSONResponse)
     def api_invoices(session: Session = Depends(get_session)):

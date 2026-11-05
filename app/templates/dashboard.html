@@ -161,6 +161,29 @@
 
 <section class="panel">
   <div class="panel-head">
+    <h2>Risk model check</h2>
+    <p>Logistic regression refit on this app's paid and overdue invoices, beside the shipped rule baseline.</p>
+    <button class="ghost small" id="risk-refit">Refit now</button>
+  </div>
+  {% if not comparison %}
+  <div class="empty"><p>No refit yet. It runs every six hours, or click Refit now.</p></div>
+  {% elif comparison.status != 'OK' %}
+  <div class="empty"><p><strong>Not enough history.</strong> {{ comparison.message }}</p></div>
+  {% else %}
+  <table class="comparison">
+    <thead><tr><th scope="col">Model</th><th scope="col">Accuracy</th><th scope="col">AUC</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">Rule baseline (shipped)</th><td>{{ '%.3f'|format(comparison.baseline_accuracy) }}</td><td>{{ '%.3f'|format(comparison.baseline_auc) }}</td></tr>
+      <tr><th scope="row">Logistic regression</th><td>{{ '%.3f'|format(comparison.logistic_accuracy) }}</td><td>{{ '%.3f'|format(comparison.logistic_auc) }}</td></tr>
+    </tbody>
+  </table>
+  <p class="hint">{{ comparison.rows_used }} invoices used, {{ comparison.late_count }} of them late. {{ comparison.message }}</p>
+  {% endif %}
+  {% if comparison %}<p class="hint">Last refit {{ comparison.created_at.strftime('%d %b %H:%M') }} UTC.</p>{% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
     <h2>Activity</h2>
     <p>PayPal events and sent reminders.</p>
   </div>
@@ -300,6 +323,11 @@ document.addEventListener("click", (event) => {
 const scanButton = document.getElementById("scan-reminders");
 scanButton.addEventListener("click", () => {
   runAction(scanButton, "Scanning...", "/api/reminders/scan");
+});
+
+const refitButton = document.getElementById("risk-refit");
+refitButton.addEventListener("click", () => {
+  runAction(refitButton, "Refitting...", "/api/risk/refit");
 });
 
 document.addEventListener("click", (event) => {

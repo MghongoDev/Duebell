@@ -61,6 +61,22 @@ class Event(SQLModel, table=True):
     received_at: datetime = Field(default_factory=utcnow)
 
 
+class RiskComparison(SQLModel, table=True):
+    """One refit of logistic regression against the rule baseline (issue #22)."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    status: str = "NOT_ENOUGH_HISTORY"
+    rows_used: int = 0
+    late_count: int = 0
+    test_rows: int = 0
+    baseline_accuracy: Optional[float] = None
+    baseline_auc: Optional[float] = None
+    logistic_accuracy: Optional[float] = None
+    logistic_auc: Optional[float] = None
+    message: str = ""
+
+
 def make_engine(database_url: str):
     connect_args = {}
     kwargs = {}

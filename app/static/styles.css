@@ -478,3 +478,16 @@ button.small {
 .channel-pick select {
   min-height: 2rem;
 }
+
+.comparison {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.comparison th,
+.comparison td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--line, #e5e5e5);
+}

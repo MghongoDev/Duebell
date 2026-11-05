@@ -85,6 +85,8 @@ Duebell is a single-user sandbox demo. It has no login, so do not expose it on t
 
 The risk model trains on synthetic client histories. Duebell ships an explainable rule baseline, and a logistic-regression script compares its held-out result beside the baseline. The comparison is a demonstration, not a claim about real clients.
 
+The app also refits the comparison on its own history every six hours, or when you click `Refit now`. It uses only invoices with a known outcome (paid, or unpaid past due), and computes each one's features from the client's earlier invoices as of its issue date. Below 30 such invoices, or fewer than 5 late or 5 on time, the dashboard says there is not enough history instead of showing a number. The seeded demo sits below that line on purpose. The rule baseline stays the shipped score either way.
+
 ```bash
 .venv/bin/python scripts/train_risk.py
 ```
