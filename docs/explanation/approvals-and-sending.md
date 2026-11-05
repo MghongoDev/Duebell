@@ -35,7 +35,7 @@ The third case trades one possible missed reminder for no duplicate. A duplicate
 
 ### Retries inside one call
 
-The sandbox gateway tries a call up to three times when it times out or PayPal returns a server error. If PayPal acted on a request whose answer was lost, a plain retry would repeat it. So each write carries a `PayPal-Request-Id` header, chosen once per action and kept for all its retries. PayPal treats a repeated ID as the same request.
+The sandbox gateway tries a call up to three times when it times out or PayPal returns a server error. If PayPal acted on a request whose answer was lost, a plain retry would repeat it. So every POST and PUT carries a `PayPal-Request-Id` header, chosen once per call and kept for all its retries. Where PayPal honours the header, it treats a repeated ID as the same request. The webhook signature check is a POST too, so it carries one, though repeating it does no harm.
 
 How far that protects depends on the endpoint:
 

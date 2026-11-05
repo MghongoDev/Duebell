@@ -1,4 +1,4 @@
-"""The dashboard page and its activity feed (issues #17, #22, #25, #26)."""
+"""The dashboard page and its activity feed (issues #17, #22, #25, #26; ADR 0008)."""
 
 from __future__ import annotations
 

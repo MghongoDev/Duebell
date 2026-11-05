@@ -39,6 +39,18 @@ def _add_routes(app: FastAPI, router: APIRouter) -> None:
     the routes go on the app directly, through the public add_api_route.
     """
     for route in router.routes:
+        unsupported = [
+            option
+            for option, value in (
+                ("dependencies", route.dependencies),
+                ("status_code", route.status_code),
+                ("response_model", route.response_model),
+            )
+            if value
+        ]
+        if unsupported:
+            # Fail at start rather than drop an option no route uses yet.
+            raise RuntimeError(f"{route.path}: _add_routes does not copy {', '.join(unsupported)}.")
         app.add_api_route(
             route.path,
             route.endpoint,

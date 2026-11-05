@@ -1,4 +1,9 @@
-"""Creating, parsing, listing, refreshing and paying invoices (issues #9-#11, #14, #23, #25)."""
+"""Creating, parsing, listing, refreshing and paying invoices.
+
+Issues #9-#11, #14, #23, #25. The model only fills the form (ADR 0004), PayPal
+is reached through the gateway (ADR 0001), and schedules wait for approval
+(ADR 0007). Every lookup is scoped to the signed-in user (ADR 0008).
+"""
 
 from __future__ import annotations
 
@@ -8,6 +13,7 @@ from pydantic import ValidationError as PydanticValidationError
 from sqlmodel import Session
 
 from app.llm import LLMError
+from app.models import IntervalUnit
 from app.paypal import PayPalError
 from app.risk import RiskLevel
 from app.routes.common import MAX_PROMPT_CHARS, current_user_id, get_session
@@ -46,7 +52,7 @@ def create_invoice_form(
     repeat: str = Form(""),
     repeat_cycles: str = Form(""),
     instalments: str = Form(""),
-    instalment_interval: str = Form("MONTH"),
+    instalment_interval: str = Form(IntervalUnit.MONTH.value),
     session: Session = Depends(get_session),
 ):
     form = {

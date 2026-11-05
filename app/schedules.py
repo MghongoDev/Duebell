@@ -18,6 +18,7 @@ from sqlmodel import Session, select
 from app.config import Settings
 from app.models import (
     Client,
+    IntervalUnit,
     Invoice,
     Schedule,
     ScheduledInvoice,
@@ -32,7 +33,7 @@ from app.paypal import PayPalGateway
 from app.services import InvoiceNotSent, create_invoice, money, send_unsent_invoice
 from app.validation import FieldError, InvoiceProposal
 
-INTERVAL_UNITS = ("WEEK", "MONTH")
+INTERVAL_UNITS = tuple(IntervalUnit)
 MIN_INSTALMENTS = 2
 MAX_INSTALMENTS = 6
 MAX_CYCLES = 60
@@ -59,7 +60,7 @@ class ScheduleRequest:
     repeat: str | None = None
     repeat_cycles: int | None = None
     instalments: int = 0
-    instalment_interval: str = "MONTH"
+    instalment_interval: str = IntervalUnit.MONTH
 
 
 def parse_schedule_request(
@@ -82,7 +83,7 @@ def parse_schedule_request(
                     FieldError("repeat_cycles", f"Repeats must be a whole number from 1 to {MAX_CYCLES}.")
                 )
     count = 0
-    interval = (instalment_interval or "MONTH").strip().upper()
+    interval = (instalment_interval or IntervalUnit.MONTH).strip().upper()
     if (instalments or "").strip() not in ("", "0"):
         try:
             count = int(instalments)
@@ -103,9 +104,9 @@ def parse_schedule_request(
 
 
 def add_interval(start: datetime, unit: str, count: int) -> datetime:
-    if unit == "WEEK":
+    if unit == IntervalUnit.WEEK:
         return start + timedelta(weeks=count)
-    if unit == "MONTH":
+    if unit == IntervalUnit.MONTH:
         month_index = start.month - 1 + count
         year = start.year + month_index // 12
         month = month_index % 12 + 1
@@ -176,7 +177,7 @@ def create_plan(
     basis: ScheduleBasis,
     *,
     instalments: int,
-    interval_unit: str = "MONTH",
+    interval_unit: str = IntervalUnit.MONTH,
     interval_count: int = 1,
     start: datetime | None = None,
 ) -> Schedule:
@@ -352,7 +353,7 @@ def schedule_rows(session: Session, scope: Scope) -> dict:
                 )
         if schedule.status == ScheduleStatus.ACTIVE:
             upcoming = [item for item in own if item.status == ScheduledInvoiceStatus.UPCOMING]
-            every = "week" if schedule.interval_unit == "WEEK" else "month"
+            every = IntervalUnit(schedule.interval_unit).noun
             if schedule.interval_count > 1:
                 every = f"{schedule.interval_count} {every}s"
             active.append(

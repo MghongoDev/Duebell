@@ -194,7 +194,8 @@ def invoice_rows(session: Session, scope: Scope) -> list[dict]:
     rows = []
     for invoice in list_invoices(session, scope):
         client = clients.get(invoice.client_id)
-        overdue = invoice.status not in CLOSED_STATUSES and invoice.due_at < now
+        closed = invoice.status in CLOSED_STATUSES
+        overdue = not closed and invoice.due_at < now
         rows.append(
             {
                 "id": invoice.id,
@@ -212,6 +213,7 @@ def invoice_rows(session: Session, scope: Scope) -> list[dict]:
                 "paid_at": invoice.paid_at.isoformat(timespec="minutes") if invoice.paid_at else None,
                 "status": invoice.status,
                 "overdue": overdue,
+                "closed": closed,
                 "risk_score": invoice.risk_score,
                 "risk_level": invoice.risk_level,
                 "risk_reasons": [line for line in invoice.risk_reasons.splitlines() if line.strip()],
@@ -242,20 +244,22 @@ def dashboard_totals(rows: list[dict]) -> dict:
     }
 
 
-def _amount_by_currency(rows) -> dict[str, int]:
-    """Total amount_cents per currency. Amounts in different currencies never add up."""
+def _tally_by_currency(rows, weigh) -> dict[str, int]:
+    """Add up weigh(row) per currency, sorted by currency code."""
     totals: dict[str, int] = {}
     for row in rows:
-        totals[row["currency"]] = totals.get(row["currency"], 0) + row["amount_cents"]
+        totals[row["currency"]] = totals.get(row["currency"], 0) + weigh(row)
     return dict(sorted(totals.items()))
+
+
+def _amount_by_currency(rows) -> dict[str, int]:
+    """Total amount_cents per currency. Amounts in different currencies never add up."""
+    return _tally_by_currency(rows, lambda row: row["amount_cents"])
 
 
 def _count_by_currency(rows) -> dict[str, int]:
     """How many rows there are in each currency."""
-    counts: dict[str, int] = {}
-    for row in rows:
-        counts[row["currency"]] = counts.get(row["currency"], 0) + 1
-    return dict(sorted(counts.items()))
+    return _tally_by_currency(rows, lambda row: 1)
 
 
 def _money_by_currency(totals: dict[str, int]) -> str:

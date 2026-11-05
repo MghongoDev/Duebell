@@ -13,8 +13,16 @@ from fastapi import Request
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session
 
+from app.models import ComparisonStatus, ReminderStatus, ScheduleKind
+
 BASE_DIR = Path(__file__).resolve().parents[1]
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+# Templates compare through the same types as the code (issue #31).
+TEMPLATES.env.globals.update(
+    ComparisonStatus=ComparisonStatus,
+    ReminderStatus=ReminderStatus,
+    ScheduleKind=ScheduleKind,
+)
 MAX_WEBHOOK_BYTES = 1_000_000
 MAX_PROMPT_CHARS = 2_000
 

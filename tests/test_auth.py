@@ -33,8 +33,10 @@ PUBLIC = {"/login", "/healthz", "/webhooks/paypal", "/static", "/openapi.json", 
 
 
 def test_every_private_route_turns_away_an_anonymous_request(app):
+    from app.web import ROUTERS
+
     anonymous = TestClient(app)
-    checked = 0
+    checked = set()
     for route in app.routes:
         path = getattr(route, "path", "")
         if path in PUBLIC or path.startswith("/static"):
@@ -47,8 +49,17 @@ def test_every_private_route_turns_away_an_anonymous_request(app):
                 assert response.status_code == 303 and response.headers["location"] == "/login", url
             else:
                 assert response.status_code == 401, (method, url)
-            checked += 1
-    assert checked >= 18
+            checked.add((method, path))
+    # Every route the route modules declare must be on the app and checked,
+    # so a route lost in registration cannot slip past this test.
+    declared = {
+        (method, route.path)
+        for module in ROUTERS
+        for route in module.router.routes
+        for method in route.methods - {"HEAD"}
+        if route.path not in PUBLIC
+    }
+    assert declared and checked == declared
 
 
 def test_public_routes_stay_open(app):

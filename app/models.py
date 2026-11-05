@@ -50,6 +50,17 @@ class ScheduleKind(StrEnum):
     INSTALMENT = "INSTALMENT"
 
 
+class IntervalUnit(StrEnum):
+    """How far apart a schedule's invoices fall."""
+
+    WEEK = "WEEK"
+    MONTH = "MONTH"
+
+    @property
+    def noun(self) -> str:
+        return self.value.lower()
+
+
 class ScheduleStatus(StrEnum):
     ACTIVE = "ACTIVE"
     DONE = "DONE"
@@ -148,7 +159,7 @@ class Schedule(SQLModel, table=True):
     amount_cents: int
     currency: str = "USD"
     terms_days: int = 14
-    interval_unit: str = "MONTH"
+    interval_unit: str = IntervalUnit.MONTH
     interval_count: int = 1
     # Recurring only: how many more invoices to queue. None repeats until cancelled.
     cycles_left: Optional[int] = None

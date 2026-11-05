@@ -28,6 +28,7 @@ Each set of values below has its own type in the code. The database stores the p
 | Invoice status | `InvoiceStatus` |
 | Reminder status | `ReminderStatus` |
 | Schedule status, schedule kind | `ScheduleStatus`, `ScheduleKind` |
+| Schedule interval | `IntervalUnit` |
 | Scheduled invoice status | `ScheduledInvoiceStatus` |
 | Risk comparison status | `ComparisonStatus` |
 | Risk level | `RiskLevel` |

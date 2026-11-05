@@ -3,7 +3,7 @@
 GitHub Actions runs these on every push and pull request, in mock mode. Run them yourself before you push, so a red check never reaches the branch. None needs credentials or a network.
 
 ```bash
-.venv/bin/pip install ruff
+.venv/bin/pip install ruff==0.16.10
 .venv/bin/ruff check --select F app scripts tests
 .venv/bin/pytest -q
 .venv/bin/python scripts/smoke.py

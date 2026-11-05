@@ -139,8 +139,8 @@
   <ul class="activity">
     {% for schedule in schedules.active %}
     <li>
-      <span class="activity-type">{% if schedule.kind == 'INSTALMENT' %}Plan{% else %}Repeats{% endif %} · {{ schedule.client_name }}</span>
-      <span>{{ schedule.description }} · {{ schedule.amount_display }} {{ schedule.currency }}{% if schedule.kind == 'INSTALMENT' %} in {{ schedule.total }} parts, {{ schedule.sent }} sent{% else %} every {{ schedule.every }}{% endif %}</span>
+      <span class="activity-type">{% if schedule.kind == ScheduleKind.INSTALMENT %}Plan{% else %}Repeats{% endif %} · {{ schedule.client_name }}</span>
+      <span>{{ schedule.description }} · {{ schedule.amount_display }} {{ schedule.currency }}{% if schedule.kind == ScheduleKind.INSTALMENT %} in {{ schedule.total }} parts, {{ schedule.sent }} sent{% else %} every {{ schedule.every }}{% endif %}</span>
       <span class="muted">{% if schedule.next_display %}next {{ schedule.next_display }}{% endif %}</span>
       <button class="ghost small" data-post="/api/schedules/{{ schedule.id }}/cancel" data-busy="Cancelling..." data-confirm="Stop future invoices from this schedule? Sent invoices stay as they are.">Cancel</button>
     </li>
@@ -168,7 +168,7 @@
         <strong>{{ reminder.invoice_number }} · {{ reminder.client_name }}</strong>
         <span class="status reminder-status-{{ reminder.status|lower }}">{{ reminder.status }}</span>
       </div>
-      {% if reminder.status == 'PENDING' %}
+      {% if reminder.status == ReminderStatus.PENDING %}
       {% if reminder.sent_channels %}
       <p class="hint">Already sent via {{ reminder.sent_channels|map(attribute='label')|join(' and ') }}. Approving again sends only the rest.</p>
       {% endif %}
@@ -213,6 +213,7 @@
       <option value="">All statuses</option>
       <option value="SENT">Sent</option>
       <option value="PAID">Paid</option>
+      <option value="MARKED_AS_PAID">Marked as paid</option>
       <option value="DRAFT">Draft</option>
       <option value="CANCELLED">Cancelled</option>
       <option value="REFUNDED">Refunded</option>
@@ -237,7 +238,7 @@
   </div>
   {% if not comparison %}
   <div class="empty"><p>No refit yet. It runs every six hours, or click Refit now.</p></div>
-  {% elif comparison.status != 'OK' %}
+  {% elif comparison.status != ComparisonStatus.OK %}
   <div class="empty"><p><strong>Not enough history.</strong> {{ comparison.message }}</p></div>
   {% else %}
   <table class="comparison">
@@ -299,8 +300,7 @@ const riskCell = (params) => {
   return `<span class="risk risk-${params.value.toLowerCase()}">${escapeHtml(params.value)}</span><ul class="reasons">${reasons}${ld}</ul>`;
 };
 const actionsCell = (params) => {
-  const closed = ["PAID", "CANCELLED", "REFUNDED"].includes(params.data.status);
-  const pay = closed ? "" : ` <button class="ghost small" data-action="pay" data-id="${params.data.id}">Simulate payment</button>`;
+  const pay = params.data.closed ? "" : ` <button class="ghost small" data-action="pay" data-id="${params.data.id}">Simulate payment</button>`;
   return `<button class="ghost small" data-action="refresh" data-id="${params.data.id}">Refresh</button>${pay}`;
 };
 

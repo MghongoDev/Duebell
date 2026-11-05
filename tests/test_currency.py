@@ -103,6 +103,7 @@ def test_marked_as_paid_is_collected_and_never_overdue(client):
         session.commit()
     [row] = client.get("/api/invoices").json()
     assert row["overdue"] is False
+    assert row["closed"] is True, "the grid hides Simulate payment for closed invoices"
     totals = dashboard_totals([row])
     assert totals["paid"] == {"USD": 100_000}
     assert totals["overdue_count"] == 0
