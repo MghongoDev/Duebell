@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import StrEnum
 from statistics import mean
 
 LIMITED_DATA_BELOW = 2
@@ -74,12 +75,18 @@ def extract_features(
     }
 
 
-def level_for(score: float) -> str:
+class RiskLevel(StrEnum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+
+def level_for(score: float) -> RiskLevel:
     if score < LOW_BELOW:
-        return "LOW"
+        return RiskLevel.LOW
     if score < HIGH_FROM:
-        return "MEDIUM"
-    return "HIGH"
+        return RiskLevel.MEDIUM
+    return RiskLevel.HIGH
 
 
 def score_invoice(

@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse
 from sqlmodel import Session
 
 from app.learning import latest_comparison
-from app.models import as_utc
+from app.models import ReminderStatus, as_utc
 from app.reminders import reminder_rows
 from app.routes.common import TEMPLATES, current_user_id, get_session
 from app.schedules import MAX_INSTALMENTS, MIN_INSTALMENTS, schedule_rows
@@ -30,7 +30,7 @@ def _activity_rows(session: Session, user_id: int, limit: int = 20) -> list[dict
     ]
     for reminder in reminder_rows(session, user_id):
         # Reminders sent before channels existed are SENT with no channel list.
-        delivered = reminder["sent_channels"] or reminder["status"] == "SENT"
+        delivered = reminder["sent_channels"] or reminder["status"] == ReminderStatus.SENT
         if not delivered or not reminder["sent_at"]:
             continue
         via = " and ".join(channel.label for channel in reminder["sent_channels"]) or "PayPal"

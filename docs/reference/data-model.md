@@ -21,6 +21,18 @@ Amounts are whole cents. Times are stored in UTC.
 
 ## Statuses
 
+Each set of values below has its own type in the code. The database stores the plain strings, so a database from an older build reads the same.
+
+| Values | Type |
+| --- | --- |
+| Invoice status | `InvoiceStatus` |
+| Reminder status | `ReminderStatus` |
+| Schedule status, schedule kind | `ScheduleStatus`, `ScheduleKind` |
+| Scheduled invoice status | `ScheduledInvoiceStatus` |
+| Risk comparison status | `ComparisonStatus` |
+| Risk level | `RiskLevel` |
+| Reminder channel | `Channel` |
+
 ### Invoice
 
 | Status | Meaning |
@@ -29,6 +41,7 @@ Amounts are whole cents. Times are stored in UTC.
 | `SENT` | PayPal sent it to the client. |
 | `PAID`, `MARKED_AS_PAID` | Paid. Both count toward history, collected totals and the risk comparison. |
 | `CANCELLED`, `REFUNDED` | Closed without payment, or refunded. |
+| `OVERDUE` | Duebell never sets it, but a refresh stores it if PayPal reports it. The scan treats it like `SENT`. |
 
 A refresh stores whatever status PayPal reports. The dashboard's overdue flag is computed: an invoice is overdue when it is past its due date and not paid, cancelled or refunded.
 

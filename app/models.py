@@ -1,4 +1,4 @@
-"""Database models and engine setup for Duebell (issues #9, #22, #24, #25, #26).
+"""Database models and engine setup for Duebell (issues #9, #22, #24, #25, #26, #31).
 
 Every table that holds a user's data has a user_id (ADR 0008). init_db adds
 columns and indexes a newer model declares to an older database, so a demo
@@ -8,6 +8,7 @@ database keeps working across builds.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from enum import StrEnum
 from typing import Optional
 
 from sqlalchemy import Index, inspect, text
@@ -24,6 +25,48 @@ def as_utc(value: datetime | None) -> datetime | None:
     if value is None or value.tzinfo:
         return value
     return value.replace(tzinfo=timezone.utc)
+
+
+class InvoiceStatus(StrEnum):
+    """Where an invoice stands. PayPal's own status names, stored as is (issue #31)."""
+
+    DRAFT = "DRAFT"
+    SENT = "SENT"
+    PAID = "PAID"
+    MARKED_AS_PAID = "MARKED_AS_PAID"
+    CANCELLED = "CANCELLED"
+    REFUNDED = "REFUNDED"
+    OVERDUE = "OVERDUE"
+
+
+class ReminderStatus(StrEnum):
+    PENDING = "PENDING"
+    SENT = "SENT"
+    REJECTED = "REJECTED"
+
+
+class ScheduleKind(StrEnum):
+    RECURRING = "RECURRING"
+    INSTALMENT = "INSTALMENT"
+
+
+class ScheduleStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    DONE = "DONE"
+    CANCELLED = "CANCELLED"
+
+
+class ScheduledInvoiceStatus(StrEnum):
+    UPCOMING = "UPCOMING"
+    PENDING = "PENDING"
+    SENT = "SENT"
+    REJECTED = "REJECTED"
+    CANCELLED = "CANCELLED"
+
+
+class ComparisonStatus(StrEnum):
+    OK = "OK"
+    NOT_ENOUGH_HISTORY = "NOT_ENOUGH_HISTORY"
 
 
 class User(SQLModel, table=True):
@@ -59,7 +102,7 @@ class Invoice(SQLModel, table=True):
     issued_at: datetime = Field(default_factory=utcnow)
     due_at: datetime = Field(default_factory=utcnow)
     paid_at: Optional[datetime] = None
-    status: str = "DRAFT"
+    status: str = InvoiceStatus.DRAFT
     risk_score: Optional[float] = None
     risk_level: Optional[str] = None
     risk_reasons: str = ""
@@ -73,7 +116,7 @@ class Reminder(SQLModel, table=True):
     invoice_id: int = Field(foreign_key="invoice.id", index=True)
     draft_text: str
     tone: str = "friendly"
-    status: str = "DRAFT"
+    status: str = ReminderStatus.PENDING
     created_at: datetime = Field(default_factory=utcnow)
     sent_at: Optional[datetime] = None
     # Comma-separated channels that have already delivered this reminder,
@@ -99,7 +142,7 @@ class Schedule(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
-    kind: str = "RECURRING"
+    kind: str = ScheduleKind.RECURRING
     client_id: int = Field(foreign_key="client.id", index=True)
     description: str = ""
     amount_cents: int
@@ -109,7 +152,7 @@ class Schedule(SQLModel, table=True):
     interval_count: int = 1
     # Recurring only: how many more invoices to queue. None repeats until cancelled.
     cycles_left: Optional[int] = None
-    status: str = "ACTIVE"
+    status: str = ScheduleStatus.ACTIVE
     created_at: datetime = Field(default_factory=utcnow)
 
 
@@ -123,7 +166,7 @@ class ScheduledInvoice(SQLModel, table=True):
     amount_cents: int
     description: str = ""
     issue_on: datetime
-    status: str = "UPCOMING"
+    status: str = ScheduledInvoiceStatus.UPCOMING
     invoice_id: Optional[int] = Field(default=None, foreign_key="invoice.id")
     created_at: datetime = Field(default_factory=utcnow)
 
@@ -134,7 +177,7 @@ class RiskComparison(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
     created_at: datetime = Field(default_factory=utcnow)
-    status: str = "NOT_ENOUGH_HISTORY"
+    status: str = ComparisonStatus.NOT_ENOUGH_HISTORY
     rows_used: int = 0
     late_count: int = 0
     test_rows: int = 0

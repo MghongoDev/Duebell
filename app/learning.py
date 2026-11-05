@@ -16,7 +16,7 @@ from datetime import datetime
 
 from sqlmodel import Session, select
 
-from app.models import Invoice, RiskComparison, as_utc, utcnow
+from app.models import ComparisonStatus, Invoice, InvoiceStatus, RiskComparison, as_utc, utcnow
 from app.ownership import EVERY_USER, Scope, check_scope, owned
 from app.risk import HIGH_FROM, HistoryInvoice, extract_features, score_invoice
 from app.services import PAID_STATUSES
@@ -25,7 +25,7 @@ FEATURES = ["late_share", "average_days_late", "amount_ratio", "terms_days", "ne
 MIN_ROWS = 30
 MIN_PER_CLASS = 5
 TEST_SHARE = 0.25
-SKIPPED = {"DRAFT", "CANCELLED"}
+SKIPPED = {InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED}
 
 
 def outcome(invoice: Invoice, now: datetime) -> int | None:
@@ -96,7 +96,7 @@ def refit(session: Session, now: datetime | None = None, *, user_id: int) -> Ris
     result = RiskComparison(user_id=user_id, rows_used=len(rows), late_count=late)
 
     if len(rows) < MIN_ROWS or min(late, on_time) < MIN_PER_CLASS:
-        result.status = "NOT_ENOUGH_HISTORY"
+        result.status = ComparisonStatus.NOT_ENOUGH_HISTORY
         result.message = (
             f"{len(rows)} invoices have a known outcome ({late} late, {on_time} on time). "
             f"A comparison needs {MIN_ROWS}, with at least {MIN_PER_CLASS} of each."
@@ -125,7 +125,7 @@ def _fit(rows: list[dict], result: RiskComparison) -> None:
     probabilities = model.predict_proba(X_test)[:, 1]
     baseline = [row["rule_score"] for row in rows_test]
 
-    result.status = "OK"
+    result.status = ComparisonStatus.OK
     result.test_rows = len(y_test)
     result.logistic_accuracy = round(float(accuracy_score(y_test, [int(p >= 0.5) for p in probabilities])), 3)
     result.logistic_auc = round(float(roc_auc_score(y_test, probabilities)), 3)

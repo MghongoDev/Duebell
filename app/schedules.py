@@ -16,7 +16,17 @@ from decimal import Decimal
 from sqlmodel import Session, select
 
 from app.config import Settings
-from app.models import Client, Invoice, Schedule, ScheduledInvoice, as_utc, utcnow
+from app.models import (
+    Client,
+    Invoice,
+    Schedule,
+    ScheduledInvoice,
+    ScheduledInvoiceStatus,
+    ScheduleKind,
+    ScheduleStatus,
+    as_utc,
+    utcnow,
+)
 from app.ownership import Scope, owned
 from app.paypal import PayPalGateway
 from app.services import InvoiceNotSent, create_invoice, money, send_unsent_invoice
@@ -27,7 +37,7 @@ MIN_INSTALMENTS = 2
 MAX_INSTALMENTS = 6
 MAX_CYCLES = 60
 MAX_INTERVAL_COUNT = 12
-OPEN_STATUSES = ("UPCOMING", "PENDING")
+OPEN_STATUSES = (ScheduledInvoiceStatus.UPCOMING, ScheduledInvoiceStatus.PENDING)
 
 
 @dataclass(frozen=True)
@@ -122,7 +132,7 @@ def _check_interval(unit: str, count: int) -> None:
 
 
 def _new_schedule(
-    session: Session, basis: ScheduleBasis, kind: str, unit: str, count: int, cycles_left: int | None
+    session: Session, basis: ScheduleBasis, kind: ScheduleKind, unit: str, count: int, cycles_left: int | None
 ) -> Schedule:
     _check_interval(unit, count)
     schedule = Schedule(
@@ -155,7 +165,7 @@ def create_recurring(
     """Repeat an invoice. `first_issue` is the next one after the invoice just sent."""
     if cycles is not None and not 1 <= cycles <= MAX_CYCLES:
         raise ValueError(f"The number of repeats must be between 1 and {MAX_CYCLES}.")
-    schedule = _new_schedule(session, basis, "RECURRING", interval_unit, interval_count, cycles)
+    schedule = _new_schedule(session, basis, ScheduleKind.RECURRING, interval_unit, interval_count, cycles)
     _queue_next(session, schedule, first_issue, sequence=1)
     session.commit()
     return schedule
@@ -173,7 +183,7 @@ def create_plan(
     """Split one amount into instalments. Each waits for approval when due."""
     amounts = split_amount(basis.amount_cents, instalments)
     start = as_utc(start or utcnow())
-    schedule = _new_schedule(session, basis, "INSTALMENT", interval_unit, interval_count, 0)
+    schedule = _new_schedule(session, basis, ScheduleKind.INSTALMENT, interval_unit, interval_count, 0)
     for index, cents in enumerate(amounts):
         session.add(
             ScheduledInvoice(
@@ -190,7 +200,7 @@ def create_plan(
 
 
 def _queue_next(session: Session, schedule: Schedule, issue_on: datetime, sequence: int) -> None:
-    if schedule.status != "ACTIVE":
+    if schedule.status != ScheduleStatus.ACTIVE:
         return
     if schedule.cycles_left is not None:
         if schedule.cycles_left <= 0:
@@ -222,18 +232,18 @@ def _open_items(session: Session, schedule: Schedule) -> list[ScheduledInvoice]:
 def draft_scheduled(session: Session, now: datetime | None = None, *, scope: Scope) -> list[ScheduledInvoice]:
     """Move due scheduled invoices to PENDING. Nothing reaches PayPal here."""
     now = as_utc(now or utcnow())
-    query = owned(select(ScheduledInvoice).where(ScheduledInvoice.status == "UPCOMING"), ScheduledInvoice, scope)
+    query = owned(select(ScheduledInvoice).where(ScheduledInvoice.status == ScheduledInvoiceStatus.UPCOMING), ScheduledInvoice, scope)
     drafted = []
     for item in session.exec(query).all():
         if as_utc(item.issue_on) > now:
             continue
         schedule = session.get(Schedule, item.schedule_id)
-        if schedule is None or schedule.status == "CANCELLED":
+        if schedule is None or schedule.status == ScheduleStatus.CANCELLED:
             continue
-        item.status = "PENDING"
+        item.status = ScheduledInvoiceStatus.PENDING
         session.add(item)
         drafted.append(item)
-        if schedule.kind == "RECURRING":
+        if schedule.kind == ScheduleKind.RECURRING:
             next_issue = add_interval(as_utc(item.issue_on), schedule.interval_unit, schedule.interval_count)
             _queue_next(session, schedule, next_issue, item.sequence + 1)
     if drafted:
@@ -245,7 +255,7 @@ def approve_scheduled(
     session: Session, item: ScheduledInvoice, settings: Settings, gateway: PayPalGateway
 ) -> Invoice:
     """Create and send the invoice through the normal path. The only way out."""
-    if item.status != "PENDING":
+    if item.status != ScheduledInvoiceStatus.PENDING:
         raise ValueError("Only a pending scheduled invoice can be approved.")
     schedule = session.get(Schedule, item.schedule_id)
     client = session.get(Client, schedule.client_id) if schedule else None
@@ -270,7 +280,7 @@ def approve_scheduled(
         session.add(item)
         session.commit()
         raise
-    item.status = "SENT"
+    item.status = ScheduledInvoiceStatus.SENT
     item.invoice_id = invoice.id
     session.add(item)
     session.commit()
@@ -279,9 +289,9 @@ def approve_scheduled(
 
 
 def reject_scheduled(session: Session, item: ScheduledInvoice) -> ScheduledInvoice:
-    if item.status != "PENDING":
+    if item.status != ScheduledInvoiceStatus.PENDING:
         raise ValueError("Only a pending scheduled invoice can be rejected.")
-    item.status = "REJECTED"
+    item.status = ScheduledInvoiceStatus.REJECTED
     session.add(item)
     session.commit()
     schedule = session.get(Schedule, item.schedule_id)
@@ -292,10 +302,10 @@ def reject_scheduled(session: Session, item: ScheduledInvoice) -> ScheduledInvoi
 
 def cancel_schedule(session: Session, schedule: Schedule) -> Schedule:
     """Stop future drafts. Invoices already sent are left alone."""
-    schedule.status = "CANCELLED"
+    schedule.status = ScheduleStatus.CANCELLED
     session.add(schedule)
     for item in _open_items(session, schedule):
-        item.status = "CANCELLED"
+        item.status = ScheduledInvoiceStatus.CANCELLED
         session.add(item)
     session.commit()
     session.refresh(schedule)
@@ -304,10 +314,10 @@ def cancel_schedule(session: Session, schedule: Schedule) -> Schedule:
 
 def _finish_if_done(session: Session, schedule: Schedule) -> None:
     """Mark a schedule DONE when it can produce nothing more and nothing is open."""
-    if schedule.status != "ACTIVE" or schedule.cycles_left != 0:
+    if schedule.status != ScheduleStatus.ACTIVE or schedule.cycles_left != 0:
         return
     if not _open_items(session, schedule):
-        schedule.status = "DONE"
+        schedule.status = ScheduleStatus.DONE
         session.add(schedule)
         session.commit()
 
@@ -328,7 +338,7 @@ def schedule_rows(session: Session, scope: Scope) -> dict:
         name = client.name if client else ""
         own = by_schedule.get(schedule.id, [])
         for item in own:
-            if item.status == "PENDING":
+            if item.status == ScheduledInvoiceStatus.PENDING:
                 pending.append(
                     {
                         "id": item.id,
@@ -340,8 +350,8 @@ def schedule_rows(session: Session, scope: Scope) -> dict:
                         "kind": schedule.kind,
                     }
                 )
-        if schedule.status == "ACTIVE":
-            upcoming = [item for item in own if item.status == "UPCOMING"]
+        if schedule.status == ScheduleStatus.ACTIVE:
+            upcoming = [item for item in own if item.status == ScheduledInvoiceStatus.UPCOMING]
             every = "week" if schedule.interval_unit == "WEEK" else "month"
             if schedule.interval_count > 1:
                 every = f"{schedule.interval_count} {every}s"
@@ -355,8 +365,8 @@ def schedule_rows(session: Session, scope: Scope) -> dict:
                     "currency": schedule.currency,
                     "every": every,
                     "next_display": as_utc(upcoming[0].issue_on).strftime("%d %b %Y") if upcoming else "",
-                    "sent": sum(1 for item in own if item.status == "SENT"),
-                    "total": len(own) if schedule.kind == "INSTALMENT" else None,
+                    "sent": sum(1 for item in own if item.status == ScheduledInvoiceStatus.SENT),
+                    "total": len(own) if schedule.kind == ScheduleKind.INSTALMENT else None,
                 }
             )
     return {"pending": pending, "active": active}

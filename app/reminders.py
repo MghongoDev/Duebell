@@ -16,13 +16,14 @@ from sqlmodel import Session, select
 
 from app.config import Settings
 from app.mailer import Mailer
-from app.models import Client, Invoice, Reminder, utcnow
+from app.models import Client, Invoice, InvoiceStatus, Reminder, ReminderStatus, utcnow
 from app.ownership import Scope, owned
 from app.paypal import PayPalGateway, PayPalTimeout
+from app.risk import RiskLevel
 from app.services import money
 
-REMINDABLE_STATUSES = {"SENT", "OVERDUE"}
-BLOCKING_REMINDER_STATUSES = {"PENDING", "SENT"}
+REMINDABLE_STATUSES = {InvoiceStatus.SENT, InvoiceStatus.OVERDUE}
+BLOCKING_REMINDER_STATUSES = {ReminderStatus.PENDING, ReminderStatus.SENT}
 MAX_DRAFT_CHARS = 2_000
 
 
@@ -48,7 +49,7 @@ def reminder_text(
 ) -> tuple[str, str]:
     now = now or utcnow()
     overdue_days = max(0, (now - invoice.due_at).days)
-    tone = "firm" if overdue_days > 14 or invoice.risk_level == "HIGH" else "friendly"
+    tone = "firm" if overdue_days > 14 or invoice.risk_level == RiskLevel.HIGH else "friendly"
     signature = settings.paypal_invoicer_email or "Duebell"
 
     if overdue_days > 0:
@@ -88,7 +89,7 @@ def is_due_for_reminder(invoice: Invoice, settings: Settings, now: datetime | No
         return False
     if overdue:
         return True
-    return invoice.risk_level in {"MEDIUM", "HIGH"}
+    return invoice.risk_level in {RiskLevel.MEDIUM, RiskLevel.HIGH}
 
 
 def _blocked_invoice_ids(session: Session) -> set[int]:
@@ -123,7 +124,7 @@ def draft_reminders(
             invoice_id=invoice.id,
             draft_text=text,
             tone=tone,
-            status="PENDING",
+            status=ReminderStatus.PENDING,
         )
         session.add(reminder)
         created.append(reminder)
@@ -180,7 +181,7 @@ def send_reminder(
     the draft stays pending and a retry skips the channels already done, so
     PayPal never sends the same reminder twice.
     """
-    if reminder.status != "PENDING":
+    if reminder.status != ReminderStatus.PENDING:
         raise ValueError("Only a pending draft can be sent.")
     channels = parse_channels(channels)
     invoice = session.get(Invoice, reminder.invoice_id)
@@ -225,7 +226,7 @@ def send_reminder(
         session.add(reminder)
         session.commit()
 
-    reminder.status = "SENT"
+    reminder.status = ReminderStatus.SENT
     reminder.sent_at = utcnow()
     session.add(reminder)
     session.commit()
@@ -234,7 +235,7 @@ def send_reminder(
 
 
 def edit_reminder(session: Session, reminder: Reminder, text: str) -> Reminder:
-    if reminder.status != "PENDING":
+    if reminder.status != ReminderStatus.PENDING:
         raise ValueError("Only a pending draft can be edited.")
     text = text.strip()
     if not text:
@@ -250,9 +251,9 @@ def edit_reminder(session: Session, reminder: Reminder, text: str) -> Reminder:
 
 
 def reject_reminder(session: Session, reminder: Reminder) -> Reminder:
-    if reminder.status != "PENDING":
+    if reminder.status != ReminderStatus.PENDING:
         raise ValueError("Only a pending draft can be rejected.")
-    reminder.status = "REJECTED"
+    reminder.status = ReminderStatus.REJECTED
     session.add(reminder)
     session.commit()
     session.refresh(reminder)

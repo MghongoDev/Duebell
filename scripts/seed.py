@@ -19,7 +19,7 @@ from sqlmodel import Session, select
 
 from app.auth import create_user
 from app.config import get_settings
-from app.models import Client, Invoice, User, init_db, make_engine, utcnow
+from app.models import Client, Invoice, InvoiceStatus, User, init_db, make_engine, utcnow
 from app.risk import HistoryInvoice, score_invoice
 
 CLIENTS = [
@@ -106,7 +106,7 @@ def seed(session: Session, user_id: int | None = None) -> dict:
                 issued_at=issued,
                 due_at=due,
                 paid_at=paid,
-                status="PAID",
+                status=InvoiceStatus.PAID,
                 risk_score=None,
                 risk_level=None,
                 risk_reasons="",
@@ -130,7 +130,7 @@ def seed(session: Session, user_id: int | None = None) -> dict:
             terms_days=14,
             issued_at=now - timedelta(days=7),
             due_at=due,
-            status="SENT",
+            status=InvoiceStatus.SENT,
             risk_score=assessment.score,
             risk_level=assessment.level,
             risk_reasons="\n".join(assessment.reasons),

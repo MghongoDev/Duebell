@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlmodel import Session
 
 from app.mailer import MailError
-from app.models import Reminder
+from app.models import Reminder, ReminderStatus
 from app.ownership import get_owned
 from app.paypal import PayPalError
 from app.reminders import (
@@ -82,7 +82,7 @@ async def api_edit_reminder(
     reminder = get_owned(session, Reminder, reminder_id, current_user_id(request))
     if reminder is None:
         return JSONResponse({"ok": False, "error": "Reminder not found."}, status_code=404)
-    if reminder.status != "PENDING":
+    if reminder.status != ReminderStatus.PENDING:
         return JSONResponse(
             {"ok": False, "error": "Only a pending draft can be edited."},
             status_code=409,

@@ -18,6 +18,7 @@ from uuid import uuid4
 import httpx
 
 from app.config import Settings
+from app.models import InvoiceStatus
 from app.retry import RetryableFailure, call_with_retries
 
 
@@ -86,12 +87,12 @@ class MockPayPal:
 
     def create_invoice(self, **facts) -> str:
         paypal_id = f"MOCK-{uuid4().hex[:12].upper()}"
-        self.invoices[paypal_id] = {**facts, "status": "DRAFT"}
+        self.invoices[paypal_id] = {**facts, "status": InvoiceStatus.DRAFT}
         return paypal_id
 
     def send_invoice(self, paypal_invoice_id: str) -> None:
         invoice = self._get(paypal_invoice_id)
-        invoice["status"] = "SENT"
+        invoice["status"] = InvoiceStatus.SENT
 
     def send_reminder(self, paypal_invoice_id: str, subject: str, note: str) -> None:
         self._get(paypal_invoice_id)
@@ -101,7 +102,7 @@ class MockPayPal:
 
     def record_payment(self, paypal_invoice_id: str, amount_cents: int, currency: str) -> None:
         invoice = self._get(paypal_invoice_id)
-        invoice["status"] = "PAID"
+        invoice["status"] = InvoiceStatus.PAID
         invoice["paid_cents"] = amount_cents
 
     def get_invoice(self, paypal_invoice_id: str) -> str:

@@ -9,6 +9,7 @@ from sqlmodel import Session
 
 from app.llm import LLMError
 from app.paypal import PayPalError
+from app.risk import RiskLevel
 from app.routes.common import MAX_PROMPT_CHARS, current_user_id, get_session
 from app.routes.dashboard import render_dashboard
 from app.schedules import (
@@ -106,7 +107,7 @@ def create_invoice_form(
             terms_days=proposal.terms_days,
             currency=proposal.currency,
         )
-        if risk.level != "HIGH":
+        if risk.level != RiskLevel.HIGH:
             return render_dashboard(
                 request,
                 session,

@@ -13,20 +13,20 @@ from uuid import uuid4
 from sqlmodel import Session, select
 
 from app.config import Settings
-from app.models import Client, Event, Invoice, utcnow
+from app.models import Client, Event, Invoice, InvoiceStatus, utcnow
 from app.ownership import Scope, get_owned, owned
 from app.paypal import PayPalError, PayPalGateway
 from app.risk import HistoryInvoice, RiskAssessment, score_invoice
 from app.validation import InvoiceProposal, proposal_to_cents
 
-PAID_STATUSES = {"PAID", "MARKED_AS_PAID"}
-CLOSED_STATUSES = {"PAID", "MARKED_AS_PAID", "CANCELLED", "REFUNDED"}
+PAID_STATUSES = {InvoiceStatus.PAID, InvoiceStatus.MARKED_AS_PAID}
+CLOSED_STATUSES = PAID_STATUSES | {InvoiceStatus.CANCELLED, InvoiceStatus.REFUNDED}
 
 EVENT_STATUS = {
-    "INVOICING.INVOICE.SENT": "SENT",
-    "INVOICING.INVOICE.PAID": "PAID",
-    "INVOICING.INVOICE.CANCELLED": "CANCELLED",
-    "INVOICING.INVOICE.REFUNDED": "REFUNDED",
+    "INVOICING.INVOICE.SENT": InvoiceStatus.SENT,
+    "INVOICING.INVOICE.PAID": InvoiceStatus.PAID,
+    "INVOICING.INVOICE.CANCELLED": InvoiceStatus.CANCELLED,
+    "INVOICING.INVOICE.REFUNDED": InvoiceStatus.REFUNDED,
 }
 
 
@@ -82,7 +82,7 @@ def client_history(session: Session, client_id: int) -> list[HistoryInvoice]:
             currency=item.currency,
         )
         for item in invoices
-        if item.status != "CANCELLED"
+        if item.status != InvoiceStatus.CANCELLED
     ]
 
 
@@ -114,7 +114,7 @@ def create_invoice(
         terms_days=proposal.terms_days,
         issued_at=now,
         due_at=now + timedelta(days=proposal.terms_days),
-        status="DRAFT",
+        status=InvoiceStatus.DRAFT,
         risk_score=assessment.score,
         risk_level=assessment.level,
         risk_reasons="\n".join(assessment.reasons),
@@ -161,14 +161,14 @@ class InvoiceNotSent(PayPalError):
 
 def send_unsent_invoice(session: Session, invoice: Invoice, gateway: PayPalGateway) -> Invoice:
     """Send an invoice PayPal holds but has not sent. Raises InvoiceNotSent on failure."""
-    if invoice.status != "DRAFT" or not invoice.paypal_invoice_id:
+    if invoice.status != InvoiceStatus.DRAFT or not invoice.paypal_invoice_id:
         raise ValueError("Only an invoice PayPal holds unsent can be sent this way.")
     try:
         gateway.send_invoice(invoice.paypal_invoice_id)
     except PayPalError as exc:
         session.refresh(invoice)
         raise InvoiceNotSent(str(exc), invoice) from exc
-    invoice.status = "SENT"
+    invoice.status = InvoiceStatus.SENT
     session.add(invoice)
     session.commit()
     session.refresh(invoice)
@@ -226,28 +226,36 @@ def dashboard_totals(rows: list[dict]) -> dict:
     # Outstanding money owed = invoices that have left draft and are not yet
     # settled. A DRAFT has never been sent, so it is not a debt to collect.
     # Amounts in different currencies are never added together.
-    outstanding = _by_currency(
-        row for row in rows if row["status"] == "SENT" and row.get("paypal_invoice_id")
+    outstanding = _amount_by_currency(
+        row for row in rows if row["status"] == InvoiceStatus.SENT and row.get("paypal_invoice_id")
     )
-    paid = _by_currency(row for row in rows if row["status"] in PAID_STATUSES)
+    paid = _amount_by_currency(row for row in rows if row["status"] in PAID_STATUSES)
     overdue = sum(1 for row in rows if row["overdue"])
     return {
         "outstanding": outstanding,
         "paid": paid,
         "outstanding_display": _money_by_currency(outstanding),
         "overdue_count": overdue,
-        "overdue_by_currency": _by_currency((row for row in rows if row["overdue"]), count=True),
+        "overdue_by_currency": _count_by_currency(row for row in rows if row["overdue"]),
         "paid_display": _money_by_currency(paid),
         "invoice_count": len(rows),
     }
 
 
-def _by_currency(rows, count: bool = False) -> dict[str, int]:
-    """Total amount_cents, or count rows, per currency. Never across currencies."""
+def _amount_by_currency(rows) -> dict[str, int]:
+    """Total amount_cents per currency. Amounts in different currencies never add up."""
     totals: dict[str, int] = {}
     for row in rows:
-        totals[row["currency"]] = totals.get(row["currency"], 0) + (1 if count else row["amount_cents"])
+        totals[row["currency"]] = totals.get(row["currency"], 0) + row["amount_cents"]
     return dict(sorted(totals.items()))
+
+
+def _count_by_currency(rows) -> dict[str, int]:
+    """How many rows there are in each currency."""
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row["currency"]] = counts.get(row["currency"], 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def _money_by_currency(totals: dict[str, int]) -> str:
@@ -287,7 +295,7 @@ def simulate_payment(session: Session, invoice: Invoice, gateway) -> Invoice:
     if not invoice.paypal_invoice_id:
         raise ValueError("Invoice has no PayPal id yet.")
     gateway.record_payment(invoice.paypal_invoice_id, invoice.amount_cents, invoice.currency)
-    apply_status(invoice, "PAID")
+    apply_status(invoice, InvoiceStatus.PAID)
     session.add(invoice)
     session.commit()
     session.refresh(invoice)
