@@ -37,7 +37,6 @@ from app.services import (
     InvoiceNotSent,
     draft_invoice,
     money,
-    on_invoice_sent,
     publish_invoice,
     send_unsent_invoice,
 )
@@ -290,9 +289,6 @@ def follow_sent(session: Session, invoice: Invoice) -> None:
     """Start the repeat held on a sent invoice and mark its scheduled item SENT (issues #78, #79)."""
     start_held_repeat(session, invoice)
     mark_linked_item_sent(session, invoice)
-
-
-on_invoice_sent(follow_sent)
 
 
 def send_draft(

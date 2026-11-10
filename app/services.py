@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
-from typing import Callable, Mapping
+from typing import Mapping
 from uuid import uuid4
 
 from sqlalchemy import func
@@ -401,32 +401,22 @@ def apply_status(invoice: Invoice, status: str) -> None:
         invoice.repeat_cycles = None
 
 
-SentHandler = Callable[[Session, Invoice], object]
-_sent_handler: SentHandler | None = None
-
-
-def on_invoice_sent(handler: SentHandler) -> None:
-    """Name the function that follows up an invoice PayPal has sent (issues #78, #79).
-
-    app.schedules imports this module and registers its handler, which starts
-    a held repeat and marks a linked scheduled item SENT, so this module can
-    do both without importing schedules back.
-    """
-    global _sent_handler
-    _sent_handler = handler
-
-
 def follow_sent_invoice(session: Session, invoice: Invoice) -> None:
     """Follow up this invoice if PayPal has sent it (issues #78, #79).
 
     Called after every status change commits, whatever moved the invoice:
-    the Send button, a webhook or a Refresh. The handler starts the repeat
-    held on the invoice and marks the scheduled item linked to it SENT. Each
-    step is one conditional update, so a race does it once, and a step a
-    crash missed runs on the next webhook or Refresh.
+    the Send button, a webhook or a Refresh. app.schedules.follow_sent starts
+    the repeat held on the invoice and marks the scheduled item linked to it
+    SENT. Each step is one conditional update, so a race does it once, and a
+    step a crash missed runs on the next webhook or Refresh.
+
+    app.schedules imports this module, so the import sits here to avoid a
+    cycle (issue #103).
     """
-    if invoice.status in SENT_STATUSES and _sent_handler:
-        _sent_handler(session, invoice)
+    if invoice.status in SENT_STATUSES:
+        from app.schedules import follow_sent
+
+        follow_sent(session, invoice)
 
 
 def reject_drafts_if_closed(session: Session, invoice: Invoice) -> int:
