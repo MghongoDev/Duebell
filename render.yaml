@@ -5,9 +5,11 @@ services:
     plan: free
     # requirements.txt is the lock: exact versions, runtime packages only.
     buildCommand: pip install -r requirements.txt
-    # Seeds the demo only when the database has no users, so a restart on a
-    # persistent disk keeps everyone's data. The free plan's disk is wiped on
-    # each deploy anyway. A hosted demo must set its own DEMO_PASSWORD.
+    # Seeds the demo only when the database has no users. On the free plan
+    # the SQLite file has no persistent disk: it is lost at every deploy,
+    # restart and spin-down (after 15 idle minutes), and the next start seeds
+    # a fresh demo. A persistent disk needs a paid instance type (issue #87).
+    # A hosted demo must set its own DEMO_PASSWORD.
     startCommand: python scripts/seed.py --if-empty --require-password && uvicorn app.web:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
     envVars:

@@ -16,9 +16,9 @@ The blueprint also:
 
 ## What the start command does
 
-It seeds the demo only when the database has no users, so a restart keeps everyone's data. It refuses to seed without `DEMO_PASSWORD`, and the deploy fails with "Set DEMO_PASSWORD." in the log. A `DEMO_PASSWORD` under 10 characters fails the deploy with "DEMO_PASSWORD is not usable: Use a password of at least 10 characters." and writes nothing.
+It seeds the demo only when the database has no users. It refuses to seed without `DEMO_PASSWORD`, and the deploy fails with "Set DEMO_PASSWORD." in the log. A `DEMO_PASSWORD` under 10 characters fails the deploy with "DEMO_PASSWORD is not usable: Use a password of at least 10 characters." and writes nothing.
 
-The free plan's disk is wiped on each deploy, so each deploy starts from the seed. For data that lasts, attach a Render disk and point `DATABASE_URL` at a file on it.
+On the free plan, data lasts only until the next spin-down, restart or deploy. A free service has no persistent disk, so the SQLite file is lost each time. Render spins a free service down after 15 minutes with no traffic, and the next request starts it again with an empty database, which the start command seeds afresh. Invoices made in the demo vanish without a deploy. For data that lasts, move to a paid instance type, attach a persistent disk, and point `DATABASE_URL` at a file on it. Free services cannot have a disk.
 
 ## Add users
 

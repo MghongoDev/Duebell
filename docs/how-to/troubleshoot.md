@@ -59,6 +59,6 @@ Find the message you see, then the fix.
 | You see | Cause | Fix |
 | --- | --- | --- |
 | Deploy fails with "Set DEMO_PASSWORD." | The start command needs a demo password. | Set `DEMO_PASSWORD` in the Render dashboard. |
-| Data gone after a deploy | The free plan's disk is wiped each deploy. | Attach a disk and point `DATABASE_URL` at it. |
+| Data gone on the free plan, with or without a deploy | A free service has no persistent disk. Its SQLite file is lost at each deploy, restart and spin-down, which comes after 15 idle minutes. The next start seeds a fresh demo. | Expected on the free plan. For data that lasts, move to a paid instance type, attach a persistent disk, and point `DATABASE_URL` at a file on it. |
 | Log at start: "Could not add unique index ux_reminder_pending_invoice" | The database holds two pending reminders for one invoice, left by an older build. | Reject one of the drafts, then restart. |
 | Log at start: "Could not add unique index ux_scheduledinvoice_schedule_sequence" | The database holds two scheduled invoices with the same place in one schedule, left by an older build. | Skip the extra one if it is still open, then remove or renumber the duplicate row with `sqlite3`, and restart. The app runs meanwhile, and the scan still claims each item once. |
