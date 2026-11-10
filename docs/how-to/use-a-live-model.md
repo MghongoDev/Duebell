@@ -10,11 +10,11 @@ Mock mode parses only one sentence pattern. To turn any short description into i
    ANTHROPIC_API_KEY=your-key
    ```
 
-   A proxy that takes a bearer token uses `ANTHROPIC_AUTH_TOKEN` instead of the key. `ANTHROPIC_MODEL` picks the model.
+   A proxy that takes a bearer token uses `ANTHROPIC_AUTH_TOKEN` instead of the key. `ANTHROPIC_MODEL` picks the model. It defaults to `claude-haiku-5-5`.
 
 2. Restart the app and use **Fill fields with AI**.
 
-The model only fills the form. Duebell rejects any field it does not expect, then checks the values with the same rules as the manual form ([ADR 0004](../adr/0004-llm-as-form-filler.md)). You still click **Create invoice**.
+The model only fills the form. Duebell rejects any field it does not expect and any value of the wrong type, such as `true` for the terms. It trims and upper-cases the currency, then checks the values with the same rules as the manual form ([ADR 0004](../adr/0004-llm-as-form-filler.md)). A field the model leaves out stays empty and is marked on the form for you to fill in. Duebell does not guess it. You still click **Create invoice**.
 
 ## Check it works
 
@@ -31,5 +31,7 @@ The script runs ten parsing cases against the model and reports each field it go
 | "Mock parsing understands..." in live mode | The base URL or credential is missing, so parsing fell back to the mock. |
 | "The AI service returned 401" | The key or token is wrong. |
 | "The AI returned fields duebell does not accept" | The model added keys. Try again, or fill the form by hand. |
+| "The AI gave a wrong type for..." | The model sent, say, text where a whole number belongs. Try again, or fill the form by hand. |
+| "The AI left these out..." | The description did not give those fields. Fill in the marked fields. |
 
 Each call costs whatever your model provider charges for one short request. Duebell tries a failed call up to three times in all.

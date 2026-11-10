@@ -23,6 +23,8 @@ The app listens on http://127.0.0.1:8000. The background scheduler drafts remind
 
 ## Checks
 
+Install the test and lint tools first: `.venv/bin/pip install -r requirements-dev.txt`. See [Run the checks](../how-to/run-checks.md), which also covers updating the dependency lock.
+
 | Command | Does |
 | --- | --- |
 | `pytest -q` | Runs the test suite. No network, no credentials. |

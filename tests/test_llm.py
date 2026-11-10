@@ -104,6 +104,75 @@ def test_an_empty_setting_in_env_falls_back_to_the_default(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_MODEL", "")
     get_settings.cache_clear()
     try:
-        assert get_settings().anthropic_model == "claude-3-5-haiku-20241022"
+        assert get_settings().anthropic_model == "claude-haiku-5-5"
     finally:
         get_settings.cache_clear()
+
+
+# Strict checks on the AI draft (issue #47).
+
+
+def test_a_field_the_model_leaves_out_stays_missing():
+    payload = {key: value for key, value in PAYLOAD.items() if key not in {"currency", "terms_days"}}
+    draft = validate_payload(payload, LIVE)
+    assert draft.currency is None
+    assert draft.terms_days is None
+    assert draft.missing == ["currency", "terms_days"]
+
+
+def test_a_null_or_blank_value_counts_as_missing():
+    draft = validate_payload({**PAYLOAD, "client_email": None, "description": "   "}, LIVE)
+    assert draft.client_email is None
+    assert draft.description is None
+    assert draft.missing == ["client_email", "description"]
+
+
+def test_a_complete_answer_has_nothing_missing():
+    assert validate_payload(PAYLOAD, LIVE).missing == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("terms_days", True),
+        ("terms_days", "14"),
+        ("terms_days", 14.5),
+        ("amount", True),
+        ("currency", 840),
+        ("client_name", ["Acme"]),
+    ],
+)
+def test_a_wrongly_typed_value_is_refused_not_coerced(field, value):
+    with pytest.raises(LLMError, match=field):
+        validate_payload({**PAYLOAD, field: value}, LIVE)
+
+
+def test_a_number_amount_is_accepted():
+    assert validate_payload({**PAYLOAD, "amount": 1200}, LIVE).amount == Decimal("1200")
+
+
+def test_a_currency_is_trimmed_and_upper_cased_before_the_check():
+    draft = validate_payload({**PAYLOAD, "currency": " usd "}, LIVE)
+    assert draft.currency == "USD"
+
+
+def test_a_present_but_invalid_value_is_still_rejected_when_others_are_missing():
+    payload = {key: value for key, value in PAYLOAD.items() if key != "currency"}
+    with pytest.raises(LLMError, match="between"):
+        validate_payload({**payload, "terms_days": 999}, LIVE)
+
+
+def test_parse_route_returns_missing_fields_empty_and_named(client):
+    payload = {key: value for key, value in PAYLOAD.items() if key not in {"currency", "terms_days"}}
+    client.app.state.llm = lambda text: validate_payload(payload, LIVE)
+    response = client.post("/parse", data={"description": "Invoice Acme 1200"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["proposal"]["currency"] == ""
+    assert body["proposal"]["terms_days"] == ""
+    assert body["proposal"]["amount"] == "1200.00"
+    assert body["missing"] == ["currency", "terms_days"]
+
+
+def test_the_default_model_is_current():
+    assert Settings().anthropic_model == "claude-haiku-5-5"

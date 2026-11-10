@@ -1,6 +1,7 @@
 """Sign-in and per-user ownership (issue #24)."""
 
 import json
+import threading
 import time
 
 import pytest
@@ -8,15 +9,20 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect, text
 from sqlmodel import Session, select
 
+from app import auth
 from app.auth import (
     COOKIE_NAME,
+    LOCKOUT_SECONDS,
     MAX_FAILURES,
     AuthError,
+    Lockout,
+    authenticate,
     create_user,
     make_session_cookie,
     read_session_cookie,
 )
 from app.models import Client, Event, Invoice, Reminder, Schedule, ScheduledInvoice, User, init_db, make_engine
+from app.web import create_app
 from scripts.create_user import claim_ownerless
 from tests.conftest import PASSWORD, add_late_payer, sign_in
 
@@ -290,3 +296,141 @@ def test_hosted_seed_refuses_the_published_default_password(tmp_path, monkeypatc
     with Session(engine) as session:
         with pytest.raises(SystemExit, match="DEMO_PASSWORD"):
             demo_user(session, require_password=True)
+
+
+# The lockout under parallel attempts, its table size, and cross-site posts (issue #45).
+
+
+def run_together(count, attempt):
+    """Run `attempt(index)` on `count` threads released at the same moment."""
+    barrier = threading.Barrier(count)
+    results = [None] * count
+
+    def worker(index):
+        barrier.wait()
+        results[index] = attempt(index)
+
+    threads = [threading.Thread(target=worker, args=(index,)) for index in range(count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    return results
+
+
+@pytest.fixture
+def slow_checks(monkeypatch):
+    """Count password checks and slow each one, so parallel attempts overlap."""
+    calls = []
+    real_check = auth.check_password
+
+    def check(password, stored):
+        calls.append(password)
+        time.sleep(0.05)
+        return real_check(password, stored)
+
+    monkeypatch.setattr(auth, "check_password", check)
+    return calls
+
+
+def test_parallel_attempts_check_at_most_the_limit(tmp_path, slow_checks):
+    engine = make_engine(f"sqlite:///{tmp_path / 'auth.db'}")
+    init_db(engine)
+    with Session(engine) as session:
+        create_user(session, "owner@duebell.test", PASSWORD)
+    lockout = Lockout()
+
+    def attempt(index):
+        with Session(engine) as session:
+            try:
+                authenticate(session, "owner@duebell.test", "wrong-password", lockout)
+            except AuthError as exc:
+                return str(exc)
+        return "signed in"
+
+    results = run_together(40, attempt)
+    assert len(slow_checks) <= MAX_FAILURES
+    assert sum("do not match" in result for result in results) <= MAX_FAILURES
+    assert sum("Too many failed attempts" in result for result in results) >= 40 - MAX_FAILURES
+    with Session(engine) as session, pytest.raises(AuthError, match="Too many failed attempts"):
+        authenticate(session, "owner@duebell.test", PASSWORD, lockout)
+
+
+def test_parallel_sign_ins_through_the_route_stay_within_the_limit(settings, tmp_path, slow_checks):
+    app = create_app(settings=settings, engine=make_engine(f"sqlite:///{tmp_path / 'web.db'}"))
+    with Session(app.state.engine) as session:
+        create_user(session, "owner@duebell.test", PASSWORD)
+    form = {"email": "owner@duebell.test", "password": "wrong-password"}
+
+    def attempt(index):
+        response = TestClient(app).post("/login", data=form, follow_redirects=False)
+        return response.status_code, "Too many failed attempts" in response.text
+
+    results = run_together(40, attempt)
+    assert len(slow_checks) <= MAX_FAILURES
+    assert all(status == 401 for status, _ in results)
+    assert sum(locked for _, locked in results) >= 40 - MAX_FAILURES
+    # The right password, once the burst is over, is refused too. A right
+    # password inside the first five would sign in and clear the count.
+    right = TestClient(app).post("/login", data=dict(form, password=PASSWORD), follow_redirects=False)
+    assert right.status_code == 401 and "Too many failed attempts" in right.text
+
+
+def test_lockout_drops_expired_entries(monkeypatch):
+    clock = [1_000_000.0]
+    monkeypatch.setattr(auth.time, "time", lambda: clock[0])
+    lockout = Lockout()
+    for index in range(50):
+        assert lockout.attempt(f"user{index}@duebell.test")
+    assert len(lockout) == 50
+    clock[0] += LOCKOUT_SECONDS + 1
+    assert lockout.attempt("fresh@duebell.test")
+    assert len(lockout) == 1
+
+
+def test_lockout_table_has_a_size_cap_that_keeps_locked_emails():
+    lockout = Lockout(max_entries=20)
+    for _ in range(MAX_FAILURES):
+        assert lockout.attempt("target@duebell.test")
+    assert not lockout.attempt("target@duebell.test")
+    for index in range(500):
+        lockout.attempt(f"random{index}@duebell.test")
+    assert len(lockout) <= 20
+    assert not lockout.attempt("target@duebell.test")
+
+
+def test_success_clears_the_count():
+    lockout = Lockout()
+    for _ in range(MAX_FAILURES - 1):
+        assert lockout.attempt("owner@duebell.test")
+    lockout.clear("owner@duebell.test")
+    for _ in range(MAX_FAILURES):
+        assert lockout.attempt("owner@duebell.test")
+    assert not lockout.attempt("owner@duebell.test")
+
+
+@pytest.mark.parametrize("origin", ["https://evil.test", "http://testserver.evil.test", "http://testserver:8001", "null"])
+def test_sign_in_refuses_a_post_from_another_site(app, origin):
+    with Session(app.state.engine) as session:
+        create_user(session, "owner@duebell.test", PASSWORD)
+    response = TestClient(app).post(
+        "/login",
+        data={"email": "owner@duebell.test", "password": PASSWORD},
+        headers={"Origin": origin},
+        follow_redirects=False,
+    )
+    assert response.status_code == 403
+    assert COOKIE_NAME not in response.headers.get("set-cookie", "")
+
+
+@pytest.mark.parametrize("headers", [{}, {"Origin": "http://testserver"}, {"Origin": "HTTPS://TestServer"}])
+def test_sign_in_accepts_its_own_origin_or_none(app, headers):
+    with Session(app.state.engine) as session:
+        create_user(session, "owner@duebell.test", PASSWORD)
+    response = TestClient(app).post(
+        "/login",
+        data={"email": "owner@duebell.test", "password": PASSWORD},
+        headers=headers,
+        follow_redirects=False,
+    )
+    assert response.status_code == 303

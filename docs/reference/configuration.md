@@ -32,7 +32,7 @@ Any value other than those listed falls back to `mock`.
 | `ANTHROPIC_BASE_URL` | empty | Live mode needs it. |
 | `ANTHROPIC_API_KEY` | empty | Live mode needs this or `ANTHROPIC_AUTH_TOKEN`. |
 | `ANTHROPIC_AUTH_TOKEN` | empty | An alternative to the API key. |
-| `ANTHROPIC_MODEL` | `claude-3-5-haiku-20241022` | The model that fills the form. |
+| `ANTHROPIC_MODEL` | `claude-haiku-5-5` | The model that fills the form. |
 | `LLM_TIMEOUT_SECONDS` | `30` | How long one model call may take. |
 
 If live mode lacks a credential or a base URL, parsing falls back to the mock parser.
@@ -88,5 +88,6 @@ These are constants in the code, not settings.
 | Instalments | 2 to 6, High-risk invoices only |
 | Repeats | 1 to 60, or no end |
 | Session length | 12 hours |
-| Failed sign-ins before a lockout | 5, for 15 minutes |
+| Sign-in attempts before a lockout | 5 within 15 minutes, counted before the password check. A correct password clears the count. |
+| Emails the lockout tracks | 10,000. Entries expire after 15 minutes. |
 | Retries for sandbox PayPal calls and model calls | 3 attempts, exponential backoff. Toolkit calls do not retry. |

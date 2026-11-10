@@ -3,6 +3,7 @@ services:
     name: duebell
     runtime: python
     plan: free
+    # requirements.txt is the lock: exact versions, runtime packages only.
     buildCommand: pip install -r requirements.txt
     # Seeds the demo only when the database has no users, so a restart on a
     # persistent disk keeps everyone's data. The free plan's disk is wiped on

@@ -1,0 +1,12 @@
+# Runtime dependencies, loosely bounded. Edit this file, then regenerate the
+# lock: see docs/how-to/run-checks.md ("Update the dependency lock").
+fastapi>=0.115
+uvicorn[standard]>=0.32
+jinja2>=3.1
+python-multipart>=0.0.12
+httpx>=0.27
+pydantic>=2.9
+sqlmodel>=0.0.48
+apscheduler>=3.10,<4
+python-dotenv>=1.0
+scikit-learn>=1.6

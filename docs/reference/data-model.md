@@ -17,7 +17,9 @@ Every table that holds a user's data has a `user_id` ([ADR 0008](../adr/0008-sig
 | `scheduledinvoice` | A **scheduled invoice**. | `schedule_id`, `sequence`, `amount_cents`, `issue_on`, `status`, `invoice_id`. |
 | `riskcomparison` | One refit of the **risk comparison**. | `status`, `rows_used`, `late_count`, `test_rows`, `baseline_accuracy`, `baseline_auc`, `logistic_accuracy`, `logistic_auc`, `message`. |
 
-Amounts are whole minor units of their currency, despite the `_cents` name: cents for USD, yen for JPY. So 12.50 USD is stored as `1250` and 1000 JPY as `1000`. Times are stored in UTC.
+Amounts are whole minor units of their currency, despite the `_cents` name: cents for USD, yen for JPY. So 12.50 USD is stored as `1250` and 1000 JPY as `1000`. Times are stored in UTC, and every time column reads back as an aware UTC datetime, whichever sqlmodel version is installed.
+
+An invoice's `due_at` is its `issued_at` plus `terms_days`. Duebell sends PayPal that date as the invoice's `due_date`, so the client sees the same **due date** that reminders and the overdue flag use. Terms of 0 days are sent as due on receipt.
 
 ## Statuses
 
@@ -42,7 +44,7 @@ Each set of values below has its own type in the code. The database stores the p
 | `SENT` | PayPal sent it to the client. |
 | `PAID`, `MARKED_AS_PAID` | Paid. Both count toward history, collected totals and the risk comparison. |
 | `CANCELLED`, `REFUNDED` | Closed without payment, or refunded. |
-| `OVERDUE` | Duebell never sets it, but a refresh stores it if PayPal reports it. The scan treats it like `SENT`. |
+| `OVERDUE` | Duebell never sets it, but a refresh stores it if PayPal reports it. The scan and the outstanding total treat it like `SENT`. |
 
 A refresh stores whatever status PayPal reports. The dashboard's overdue flag is computed: an invoice is overdue when it is past its due date and not paid, cancelled or refunded.
 
@@ -68,7 +70,7 @@ A refresh stores whatever status PayPal reports. The dashboard's overdue flag is
 
 ### Scheduled invoice
 
-`UPCOMING`, then `PENDING` when the scan finds it due, then `SENT` once approved. It can also end `REJECTED` (skipped) or `CANCELLED` (its schedule was cancelled). `invoice_id` links the invoice it became. It is set before `SENT` if PayPal created the draft but the send failed.
+`UPCOMING`, then `PENDING` when the scan finds it due, then `SENDING` while one approval talks to PayPal, then `SENT`. Approval claims the item by moving it from `PENDING` to `SENDING` in one conditional update, so a second approval at the same moment gets a 409. A failed send puts it back to `PENDING`, and so does a restart that finds it `SENDING`. It can also end `REJECTED` (skipped) or `CANCELLED` (its schedule was cancelled). `invoice_id` links the invoice it became. It is set before `SENT` if PayPal created the draft but the send failed.
 
 ### Risk comparison
 

@@ -144,9 +144,15 @@ def create_invoice_form(
         draft_scheduled(session, scope=current_user_id(request))
         return RedirectResponse(url="/", status_code=303)
 
+    warnings: list[str] = []
     try:
         invoice = create_invoice(
-            session, proposal, request.app.state.settings, request.app.state.gateway, user_id=current_user_id(request)
+            session,
+            proposal,
+            request.app.state.settings,
+            request.app.state.gateway,
+            user_id=current_user_id(request),
+            warnings=warnings,
         )
     except PayPalError as exc:
         return render_dashboard(
@@ -172,7 +178,7 @@ def create_invoice_form(
             cycles=schedule_request.repeat_cycles,
             first_issue=add_interval(invoice.issued_at, schedule_request.repeat, 1),
         )
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url="/?notice=send-unconfirmed" if warnings else "/", status_code=303)
 
 
 @router.post("/parse", response_class=JSONResponse)
@@ -190,7 +196,12 @@ async def parse_description(request: Request):
         proposal = request.app.state.llm(text)
     except LLMError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
-    return JSONResponse({"ok": True, "proposal": proposal.model_dump(mode="json")})
+    # A field the model left out comes back empty and is named in `missing`,
+    # so the form can mark it for the person (issue #47).
+    fields = proposal.model_dump(mode="json")
+    missing = [name for name, value in fields.items() if value is None]
+    filled = {name: "" if value is None else value for name, value in fields.items()}
+    return JSONResponse({"ok": True, "proposal": filled, "missing": missing})
 
 
 @router.get("/api/invoices", response_class=JSONResponse)
@@ -225,6 +236,8 @@ def api_simulate_payment(
         return JSONResponse({"ok": False, "error": "Invoice not found."}, status_code=404)
     try:
         simulate_payment(session, invoice, request.app.state.gateway)
-    except (PayPalError, ValueError) as exc:
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+    except PayPalError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
     return {"ok": True, "status": invoice.status}

@@ -17,6 +17,12 @@
   --shadow: 0 18px 40px rgba(23, 33, 43, 0.08);
 }
 
+/* The hidden attribute always hides, whatever display a class sets (issue #63).
+   To show such an element, remove hidden; setting style.display will not. */
+[hidden] {
+  display: none !important;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -184,6 +190,12 @@ body {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
   border-color: var(--accent);
+}
+
+/* A field the AI left out, for the person to fill in (issue #47). */
+.invoice-form .missing {
+  border-color: var(--amber);
+  background: var(--amber-soft);
 }
 
 .ai-draft {
@@ -501,10 +513,6 @@ button.small {
   padding: 0.8rem;
   border: 1px dashed var(--line);
   border-radius: 9px;
-}
-
-.plan-offer[hidden] {
-  display: none;
 }
 
 .plan-offer .hint {

@@ -20,7 +20,7 @@ from app.models import Client, Invoice, InvoiceStatus, Reminder, ReminderStatus,
 from app.ownership import Scope, owned
 from app.paypal import PayPalGateway, PayPalTimeout
 from app.risk import RiskLevel
-from app.services import money
+from app.services import CLOSED_STATUSES, money, reject_drafts_if_closed
 
 REMINDABLE_STATUSES = {InvoiceStatus.SENT, InvoiceStatus.OVERDUE}
 BLOCKING_REMINDER_STATUSES = {ReminderStatus.PENDING, ReminderStatus.SENT}
@@ -106,6 +106,9 @@ def draft_reminders(
     *,
     scope: Scope,
 ) -> list[Reminder]:
+    closed = owned(select(Invoice).where(Invoice.status.in_(CLOSED_STATUSES)), Invoice, scope)
+    if sum(reject_drafts_if_closed(session, invoice) for invoice in session.exec(closed).all()):
+        session.commit()
     blocked = _blocked_invoice_ids(session)
     created: list[Reminder] = []
     query = owned(select(Invoice).where(Invoice.status.in_(REMINDABLE_STATUSES)), Invoice, scope)
@@ -187,6 +190,11 @@ def send_reminder(
     invoice = session.get(Invoice, reminder.invoice_id)
     if invoice is None:
         raise ValueError("This reminder has no invoice.")
+    if invoice.status in CLOSED_STATUSES:
+        reminder.status = ReminderStatus.REJECTED
+        session.add(reminder)
+        session.commit()
+        raise ValueError("This invoice is already closed, so the draft was rejected.")
     if Channel.PAYPAL in channels and not invoice.paypal_invoice_id:
         raise ValueError("This invoice has no PayPal id yet.")
     if Channel.EMAIL in channels and mailer is None:

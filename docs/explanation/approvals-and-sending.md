@@ -15,6 +15,8 @@ The reason is cost. A wrong reminder can damage a client relationship, and a wro
 
 The scan runs every 30 minutes and on `Scan now`. It drafts a reminder for a sent invoice that is overdue, or due within the reminder window and scored Medium or High. It skips invoices with no PayPal ID, because a draft for them could never be sent. It also skips invoices that already have a pending or sent reminder.
 
+Once an invoice is paid, cancelled or refunded, its pending drafts are rejected: by the webhook or refresh that closes it, by a simulated payment, and by the next scan. Approving a draft for a closed invoice is refused and rejects the draft, so a client never gets a reminder for an invoice they have paid.
+
 ## Channels
 
 When approving a reminder, the user picks a [channel](../../GLOSSARY.md): PayPal, email, or both. PayPal goes first.
@@ -49,6 +51,8 @@ Toolkit calls carry no request ID, because the toolkit builds its own requests. 
 ## Schedules
 
 A repeat sends its first invoice when the user submits the form. A schedule then queues the next one. When its date comes, the scan moves it to pending. Approving it creates the invoice through the same path as the form, so it gets a risk score, reminders and history like any other.
+
+An approval claims the item before it calls PayPal, so a double click or a second tab cannot bill the client twice. If PayPal does not confirm a send in time, Duebell counts the invoice as sent and warns you to check PayPal, the same rule it applies to reminders. Sending again could bill the client twice; counting it as sent risks only an invoice you have to send by hand.
 
 Skipping one leaves the repeat running. Cancelling the schedule cancels everything upcoming or pending and leaves sent invoices alone. A schedule stays active, and can be cancelled, until its last invoice is approved or skipped.
 

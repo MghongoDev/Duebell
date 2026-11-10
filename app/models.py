@@ -11,7 +11,8 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Optional
 
-from sqlalchemy import Index, inspect, text
+from sqlalchemy import DateTime, Index, inspect, text
+from sqlalchemy.types import TypeDecorator
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Field, SQLModel, create_engine
 
@@ -25,6 +26,24 @@ def as_utc(value: datetime | None) -> datetime | None:
     if value is None or value.tzinfo:
         return value
     return value.replace(tzinfo=timezone.utc)
+
+
+class UTCDateTime(TypeDecorator):
+    """Store UTC and always read back an aware UTC datetime (issue #34).
+
+    SQLite keeps no offset. Declaring the type here, not relying on the
+    sqlmodel default, keeps every comparison with utcnow() working whatever
+    sqlmodel version is installed. A naive value is taken to be UTC.
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return None if value is None else as_utc(value).astimezone(timezone.utc)
+
+    def process_result_value(self, value, dialect):
+        return None if value is None else as_utc(value).astimezone(timezone.utc)
 
 
 class InvoiceStatus(StrEnum):
@@ -70,6 +89,8 @@ class ScheduleStatus(StrEnum):
 class ScheduledInvoiceStatus(StrEnum):
     UPCOMING = "UPCOMING"
     PENDING = "PENDING"
+    # Claimed by one approval while it talks to PayPal (issue #39).
+    SENDING = "SENDING"
     SENT = "SENT"
     REJECTED = "REJECTED"
     CANCELLED = "CANCELLED"
@@ -86,7 +107,7 @@ class User(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     email: str = Field(index=True, unique=True)
     password_hash: str
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
 
 
 class Client(SQLModel, table=True):
@@ -97,7 +118,7 @@ class Client(SQLModel, table=True):
     user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
     name: str
     email: str = Field(index=True)
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
 
 
 class Invoice(SQLModel, table=True):
@@ -110,15 +131,15 @@ class Invoice(SQLModel, table=True):
     amount_cents: int
     currency: str = "USD"
     terms_days: int = 14
-    issued_at: datetime = Field(default_factory=utcnow)
-    due_at: datetime = Field(default_factory=utcnow)
-    paid_at: Optional[datetime] = None
+    issued_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    due_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    paid_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
     status: str = InvoiceStatus.DRAFT
     risk_score: Optional[float] = None
     risk_level: Optional[str] = None
     risk_reasons: str = ""
     limited_data: bool = False
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
 
 
 class Reminder(SQLModel, table=True):
@@ -128,8 +149,8 @@ class Reminder(SQLModel, table=True):
     draft_text: str
     tone: str = "friendly"
     status: str = ReminderStatus.PENDING
-    created_at: datetime = Field(default_factory=utcnow)
-    sent_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    sent_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
     # Comma-separated channels that have already delivered this reminder,
     # e.g. "paypal" or "paypal,email". A retry skips them.
     sent_channels: str = ""
@@ -141,7 +162,7 @@ class Event(SQLModel, table=True):
     user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
     event_type: str
     payload: str = ""
-    received_at: datetime = Field(default_factory=utcnow)
+    received_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
 
 
 class Schedule(SQLModel, table=True):
@@ -164,7 +185,7 @@ class Schedule(SQLModel, table=True):
     # Recurring only: how many more invoices to queue. None repeats until cancelled.
     cycles_left: Optional[int] = None
     status: str = ScheduleStatus.ACTIVE
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
 
 
 class ScheduledInvoice(SQLModel, table=True):
@@ -176,10 +197,10 @@ class ScheduledInvoice(SQLModel, table=True):
     sequence: int = 1
     amount_cents: int
     description: str = ""
-    issue_on: datetime
+    issue_on: datetime = Field(sa_type=UTCDateTime)
     status: str = ScheduledInvoiceStatus.UPCOMING
     invoice_id: Optional[int] = Field(default=None, foreign_key="invoice.id")
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
 
 
 class RiskComparison(SQLModel, table=True):
@@ -187,7 +208,7 @@ class RiskComparison(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
     status: str = ComparisonStatus.NOT_ENOUGH_HISTORY
     rows_used: int = 0
     late_count: int = 0
