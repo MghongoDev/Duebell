@@ -13,7 +13,9 @@ The reason is cost. A wrong reminder can damage a client relationship, and a wro
 | A repeat's next invoice | The scan, when its date comes | `Approve and send` |
 | An instalment | The plan, when its date comes | `Approve and send` |
 
-The scan runs every 30 minutes and on `Scan now`. It drafts a reminder for a sent invoice that is overdue, or due within the reminder window and scored Medium or High. It skips invoices with no PayPal ID, because a draft for them could never be sent. It also skips invoices that already have a pending or sent reminder.
+The scan runs every 30 minutes and on `Scan now`. It drafts a reminder for a sent invoice that is overdue, or due within the reminder window and scored Medium or High. It skips invoices with no PayPal ID, because a draft for them could never be sent. An invoice can get two reminders: one before it is due and one once it is overdue. Each reminder records its [stage](../../GLOSSARY.md) when the scan drafts it: overdue once the invoice is a full day past its due date, before due until then. The scan skips an invoice that has a pending draft, whatever its stage, and an invoice that already has a sent reminder in the stage it would draft now. A rejected draft blocks nothing. So a Medium-risk invoice that got its friendly reminder still gets an overdue draft once it is late, and never a second reminder in either stage.
+
+A reminder from a build that did not record stages counts as overdue if it was drafted a full day past the due date, and as before due otherwise.
 
 The scheduler and `Scan now` can run at the same moment. Each still acts once. A scan claims a due scheduled invoice with one conditional update before it queues the next one, so a repeat never gains an extra invoice. The database allows one pending reminder per invoice, so a second scan's draft is refused and skipped.
 
@@ -35,7 +37,7 @@ Three failures could each lead to a duplicate. Duebell handles each one differen
 | Email fails after PayPal sent the reminder | A retry reminds through PayPal again. | `sent_channels` records PayPal, and the retry skips it. |
 | A toolkit call times out | The call keeps running and may still send. A retry sends again. | It counts the PayPal reminder as sent and warns the user to check PayPal. |
 
-The third case trades one possible missed reminder for no duplicate. A duplicate reaches the client. A missed one shows up when the user checks PayPal, and they can remind from there. Duebell will not draft another reminder for that invoice, because it counts this one as sent.
+The third case trades one possible missed reminder for no duplicate. A duplicate reaches the client. A missed one shows up when the user checks PayPal, and they can remind from there. Duebell will not draft another reminder for that invoice in the same stage, because it counts this one as sent.
 
 ### Retries inside one call
 
@@ -52,7 +54,7 @@ Toolkit calls carry no request ID, because the toolkit builds its own requests. 
 
 ## Schedules
 
-A repeat sends its first invoice when the user submits the form. A schedule then queues the next one. When its date comes, the scan moves it to pending. Approving it creates the invoice through the same path as the form, so it gets a risk score, reminders and history like any other.
+A repeat sends its first invoice when the user submits the form. A schedule then queues the next one. Each date counts from the first invoice, not from the date before it, so a short month does not pull later months back. When its date comes, the scan moves it to pending. Approving it creates the invoice through the same path as the form, so it gets a risk score, reminders and history like any other.
 
 An approval claims the item before it calls PayPal, so a double click or a second tab cannot bill the client twice. If PayPal does not confirm a send in time, Duebell counts the invoice as sent and warns you to check PayPal, the same rule it applies to reminders. Sending again could bill the client twice; counting it as sent risks only an invoice you have to send by hand.
 

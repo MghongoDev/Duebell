@@ -1,4 +1,4 @@
-"""Database models and engine setup for Duebell (issues #9, #22, #24, #25, #26, #31, #40, #41).
+"""Database models and engine setup for Duebell (issues #9, #22, #24, #25, #26, #31, #40, #41, #42).
 
 Every table that holds a user's data has a user_id (ADR 0008). init_db adds
 columns and indexes a newer model declares to an older database, so a demo
@@ -65,6 +65,13 @@ class ReminderStatus(StrEnum):
     PENDING = "PENDING"
     SENT = "SENT"
     REJECTED = "REJECTED"
+
+
+class ReminderStage(StrEnum):
+    """Where an invoice stood when its reminder was drafted (issue #42)."""
+
+    BEFORE_DUE = "BEFORE_DUE"
+    OVERDUE = "OVERDUE"
 
 
 class ScheduleKind(StrEnum):
@@ -167,6 +174,9 @@ class Reminder(SQLModel, table=True):
     # Comma-separated channels that have already delivered this reminder,
     # e.g. "paypal" or "paypal,email". A retry skips them.
     sent_channels: str = ""
+    # BEFORE_DUE or OVERDUE, set when drafted (issue #42). A row from an older
+    # build has none; the scan infers it from created_at and the due date.
+    stage: Optional[str] = None
 
 
 class Event(SQLModel, table=True):
@@ -197,6 +207,10 @@ class Schedule(SQLModel, table=True):
     interval_count: int = 1
     # Recurring only: how many more invoices to queue. None repeats until cancelled.
     cycles_left: Optional[int] = None
+    # Recurring only: the date of the invoice that started the repeat. Each
+    # occurrence counts from it, so a repeat from the 31st keeps the month end
+    # (issue #43). None on a repeat an older build made.
+    starts_on: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
     status: str = ScheduleStatus.ACTIVE
     created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
 
