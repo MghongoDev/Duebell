@@ -1,4 +1,4 @@
-"""Refit the risk comparison on the app's own payment history (issue #22, ADRs 0002, 0008).
+"""Refit the risk comparison on the app's own payment history (issues #22, #46; ADRs 0002, 0008).
 
 The rule baseline stays the shipped score (ADR 0002). This module fits a
 logistic regression on invoices whose outcome is known and stores a held-out
@@ -16,46 +16,33 @@ from datetime import datetime
 
 from sqlmodel import Session, select
 
-from app.models import ComparisonStatus, Invoice, InvoiceStatus, RiskComparison, as_utc, utcnow
+from app.models import ComparisonStatus, Invoice, RiskComparison, as_utc, utcnow
 from app.ownership import EVERY_USER, Scope, check_scope, owned
-from app.risk import HIGH_FROM, HistoryInvoice, extract_features, score_invoice
-from app.services import PAID_STATUSES
+from app.risk import HIGH_FROM, HistoryInvoice, days_late, extract_features, outcome_known, score_invoice
+from app.services import NOT_HISTORY, history_as_of
 
 FEATURES = ["late_share", "average_days_late", "amount_ratio", "terms_days", "new_client"]
 MIN_ROWS = 30
 MIN_PER_CLASS = 5
 TEST_SHARE = 0.25
-SKIPPED = {InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED}
 
 
 def outcome(invoice: Invoice, now: datetime) -> int | None:
-    """1 if paid late or unpaid past due, 0 if paid on time, None if unknown."""
-    if invoice.status in SKIPPED:
+    """1 if paid late or unpaid past due, 0 if paid on time, None if unknown.
+
+    Uses the same known-outcome rule as a client's history (issue #46).
+    """
+    if invoice.status in NOT_HISTORY:
         return None
-    due = as_utc(invoice.due_at)
     paid = as_utc(invoice.paid_at)
-    if invoice.status in PAID_STATUSES and paid is not None:
-        return 1 if (paid - due).days > 0 else 0
-    if paid is None and due < now:
-        return 1
-    return None
-
-
-def _history_as_of(invoices: list[Invoice], as_of: datetime) -> list[HistoryInvoice]:
-    history = []
-    for item in invoices:
-        if item.status in SKIPPED or as_utc(item.issued_at) >= as_of:
-            continue
-        paid = as_utc(item.paid_at)
-        history.append(
-            HistoryInvoice(
-                amount_cents=item.amount_cents,
-                due_at=as_utc(item.due_at),
-                paid_at=paid if paid is not None and paid <= as_of else None,
-                currency=item.currency,
-            )
-        )
-    return history
+    item = HistoryInvoice(
+        amount_cents=invoice.amount_cents,
+        due_at=as_utc(invoice.due_at),
+        paid_at=paid if paid is not None and paid <= now else None,
+    )
+    if not outcome_known(item, now):
+        return None
+    return 1 if days_late(item, now) > 0 else 0
 
 
 def training_rows(session: Session, now: datetime | None = None, *, scope: Scope) -> list[dict]:
@@ -71,7 +58,7 @@ def training_rows(session: Session, now: datetime | None = None, *, scope: Scope
         if label is None:
             continue
         as_of = as_utc(invoice.issued_at)
-        history = _history_as_of(by_client[invoice.client_id], as_of)
+        history = history_as_of(by_client[invoice.client_id], as_of)
         features = extract_features(
             invoice.amount_cents, invoice.terms_days, history, now=as_of, currency=invoice.currency
         )
