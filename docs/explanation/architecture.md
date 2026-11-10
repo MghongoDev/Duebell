@@ -38,14 +38,14 @@ Every route is a plain `def`, so FastAPI runs it in its threadpool, and the midd
 
 1. The user fills the form, or `POST /parse` turns free text into the same six fields.
 2. Duebell rejects any extra key from the model. `InvoiceProposal` and `validate_proposal` check every value, the same way for both paths ([ADR 0004](../adr/0004-llm-as-form-filler.md)).
-3. `create_invoice` finds or creates the client, scores the risk, and saves a `DRAFT`.
-4. The gateway creates the PayPal invoice, then sends it. If the send fails, the invoice stays a draft with its PayPal ID, and **Send** on its row (`POST /api/invoices/{id}/send`) sends that draft. A ticked Repeat waits on the draft. It becomes a schedule once the draft is sent, paid or overdue, whatever moved it: **Send**, a webhook or **Refresh**. If the draft is cancelled or refunded instead, the repeat is dropped.
+3. `create_invoice` finds or creates the client, scores the risk, and saves a `DRAFT` (`draft_invoice`).
+4. The gateway creates the PayPal invoice, then sends it (`publish_invoice`). If PayPal refuses to create it, the draft is deleted. If the send fails, the invoice stays a draft with its PayPal ID, and **Send** on its row (`POST /api/invoices/{id}/send`) sends that draft. A ticked Repeat waits on the draft. It becomes a schedule once the draft is sent, paid or overdue, whatever moved it: **Send**, a webhook or **Refresh**. If the draft is cancelled or refunded instead, the repeat is dropped.
 
 ## Background work
 
 The scheduler runs inside the app process.
 
-- Every 30 minutes it drafts reminders and moves due scheduled invoices to pending, for every user. It never sends.
+- Every 30 minutes it drafts reminders and moves due scheduled invoices to pending, for every user. It never sends. The two steps run apart, each in its own session with its own error log, so if one fails the other still runs.
 - Every six hours it refits the risk comparison once per user.
 
 The scheduler is the only caller that may scan every user. It says so explicitly, with the `EVERY_USER` scope.

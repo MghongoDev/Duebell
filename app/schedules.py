@@ -1,4 +1,4 @@
-"""Recurring invoices and instalment plans (issues #24, #25, #39, #40, #43, #78; ADRs 0003, 0007, 0008).
+"""Recurring invoices and instalment plans (issues #24, #25, #39, #40, #43, #74, #78; ADRs 0003, 0007, 0008).
 
 A schedule is the rule: repeat an invoice every interval, or split one amount
 into instalments. Each future invoice is a ScheduledInvoice. The scan moves due
@@ -31,13 +31,14 @@ from app.models import (
     utcnow,
 )
 from app.ownership import Scope, owned
-from app.paypal import PayPalGateway
+from app.paypal import PayPalError, PayPalGateway
 from app.services import (
     SENT_STATUSES,
     InvoiceNotSent,
-    create_invoice,
+    draft_invoice,
     money,
     on_held_repeat_sent,
+    publish_invoice,
     send_unsent_invoice,
 )
 from app.validation import FieldError, InvoiceProposal
@@ -409,11 +410,29 @@ def _release(session: Session, item: ScheduledInvoice) -> None:
     session.commit()
 
 
+def _drop_unpublished(session: Session, item: ScheduledInvoice) -> None:
+    """Release the item after PayPal refused to create its invoice (issue #74).
+
+    As on the form, the local draft PayPal never took is deleted. The item is
+    unlinked in the same commit, so the next approval drafts afresh.
+    """
+    session.rollback()
+    session.refresh(item)
+    linked = session.get(Invoice, item.invoice_id) if item.invoice_id is not None else None
+    if linked is not None and linked.status == InvoiceStatus.DRAFT and not linked.paypal_invoice_id:
+        item.invoice_id = None
+        session.delete(linked)
+    item.status = ScheduledInvoiceStatus.PENDING
+    session.add(item)
+    session.commit()
+
+
 def release_interrupted(session: Session) -> int:
     """Return items a stopped process left SENDING to PENDING. Run at startup.
 
-    A retry is safe: an item that reached PayPal keeps its invoice_id, and
-    approval then sends that invoice instead of creating another.
+    A retry is safe: approval links the item to its invoice before PayPal is
+    called, so the next approval finishes that invoice instead of creating
+    another (issue #74).
     """
     result = session.exec(
         update(ScheduledInvoice)
@@ -435,7 +454,11 @@ def approve_scheduled(
     """Create and send the invoice through the normal path. The only way out.
 
     The item is claimed before PayPal is called, so a double click or a second
-    tab gets a 409 instead of a second invoice (issue #39).
+    tab gets a 409 instead of a second invoice (issue #39). The local draft is
+    saved and linked to the item, committed, before PayPal is called. A retry
+    then picks up where the last one stopped: it creates a linked draft in
+    PayPal if PayPal does not hold it yet, sends it if PayPal holds it unsent,
+    and marks the item sent if PayPal has sent it (issue #74).
     """
     if item.status != ScheduledInvoiceStatus.PENDING:
         raise ValueError("Only a pending scheduled invoice can be approved.")
@@ -446,15 +469,8 @@ def approve_scheduled(
     if not _claim(session, item):
         raise ValueError("This scheduled invoice is already being approved.")
     try:
-        linked = session.get(Invoice, item.invoice_id) if item.invoice_id is not None else None
-        if linked is not None and linked.status != InvoiceStatus.DRAFT:
-            # PayPal sent it after all, for example after a timeout; a webhook
-            # or refresh has said so. Nothing more to send.
-            invoice = linked
-        elif linked is not None:
-            # An earlier approval created the PayPal invoice but could not send it.
-            invoice = send_unsent_invoice(session, linked, gateway, warnings=warnings)
-        else:
+        invoice = session.get(Invoice, item.invoice_id) if item.invoice_id is not None else None
+        if invoice is None:
             proposal = InvoiceProposal(
                 client_name=client.name,
                 client_email=client.email,
@@ -463,14 +479,27 @@ def approve_scheduled(
                 currency=schedule.currency,
                 terms_days=schedule.terms_days,
             )
-            invoice = create_invoice(
-                session, proposal, settings, gateway, user_id=schedule.user_id, warnings=warnings
-            )
-    except InvoiceNotSent as exc:
+            # Link the saved draft before calling PayPal, so a retry after
+            # a failed commit or a restart finds this invoice (issue #74).
+            invoice = draft_invoice(session, proposal, user_id=schedule.user_id)
+            item.invoice_id = invoice.id
+            session.add(item)
+            session.commit()
+        if invoice.status != InvoiceStatus.DRAFT:
+            # PayPal sent it after all, for example after a timeout; a webhook
+            # or refresh has said so. Nothing more to send.
+            pass
+        elif invoice.paypal_invoice_id:
+            # An earlier approval created the PayPal invoice but could not send it.
+            invoice = send_unsent_invoice(session, invoice, gateway, warnings=warnings)
+        else:
+            # A new draft, or one a restart left before PayPal created it.
+            invoice = publish_invoice(session, invoice, gateway, warnings=warnings)
+    except InvoiceNotSent:
         _release(session, item)
-        item.invoice_id = exc.invoice.id
-        session.add(item)
-        session.commit()
+        raise
+    except PayPalError:
+        _drop_unpublished(session, item)
         raise
     except Exception:
         _release(session, item)

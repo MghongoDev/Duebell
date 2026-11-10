@@ -10,6 +10,7 @@ Duebell is a sandbox demo, but it can be hosted for several people. This page ex
 - SameSite=Lax also stops other sites from posting forms with the cookie.
 - Sign-in needs no cookie, so it checks the `Origin` header instead. A post whose `Origin` names a host other than the one it was sent to gets `403`, which stops a hostile page from signing a victim into the attacker's account. Duebell allows a post with no `Origin`, since some clients leave it out. The referrer policy is `same-origin`: it sends nothing to other sites, and it lets a browser name its own origin. Under `no-referrer` a browser sends `Origin: null` on every form post, which the check refuses.
 - Five sign-in attempts within 15 minutes lock an email until the oldest is 15 minutes old. Each attempt is counted before its password is checked, so attempts sent at the same moment cannot slip past the limit. A correct password clears the count. An unknown email takes the same time and gets the same message as a wrong password.
+- Sign-in refuses an email no user can have, one over 254 characters or without an `@`, before the lockout counts it, so junk cannot fill the table. It also refuses a password over 1,024 characters without hashing it. Both get the same message as a wrong password. `scripts/create_user.py` applies the same limits.
 - The lockout tracks at most 10,000 emails. It drops entries older than 15 minutes, and when full it drops the least recent email that is not locked, so a flood of new emails cannot free a locked one.
 - There is no public sign-up. Whoever runs the server adds users with `scripts/create_user.py`.
 
@@ -51,6 +52,7 @@ img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors
 
 - A session cannot be revoked before it expires, except by changing `SECRET_KEY`, which signs everyone out.
 - The lockout lives in process memory. A restart clears it.
+- Anyone can keep the demo account locked by sending five wrong passwords every 15 minutes. The lockout counts attempts per email, not per client. Counting per client address would mean trusting the `X-Forwarded-For` header that Render's proxy adds, and any client can forge that header, so an attacker could make unlimited guesses by sending a new address each time. Duebell keeps counting per email.
 - There is no password reset and no email check on new users.
 - SQLite and a single process: no running several copies of the app.
 
