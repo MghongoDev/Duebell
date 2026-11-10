@@ -1,4 +1,4 @@
-"""Recurring invoices and instalment plans (issues #24, #25, #39, #40, #43, #74, #77, #78; ADRs 0003, 0007, 0008).
+"""Recurring invoices and instalment plans (issues #24, #25, #39, #40, #43, #74, #77, #78, #79; ADRs 0003, 0007, 0008).
 
 A schedule is the rule: repeat an invoice every interval, or split one amount
 into instalments. Each future invoice is a ScheduledInvoice. The scan moves due
@@ -37,7 +37,7 @@ from app.services import (
     InvoiceNotSent,
     draft_invoice,
     money,
-    on_held_repeat_sent,
+    on_invoice_sent,
     publish_invoice,
     send_unsent_invoice,
 )
@@ -245,20 +245,69 @@ def start_held_repeat(session: Session, invoice: Invoice) -> Schedule | None:
     return schedule
 
 
-on_held_repeat_sent(start_held_repeat)
+# An item that could still be marked sent: not yet sent, and not claimed by
+# an approval, which marks its own item when it ends (issue #79).
+UNSENT_ITEM_STATUSES = (
+    ScheduledInvoiceStatus.PENDING,
+    ScheduledInvoiceStatus.REJECTED,
+    ScheduledInvoiceStatus.CANCELLED,
+)
+
+
+def mark_linked_item_sent(session: Session, invoice: Invoice) -> ScheduledInvoice | None:
+    """Mark the scheduled item linked to a sent invoice SENT, then finish its schedule if done (issue #79).
+
+    The client got the invoice, so the item says so, even if it was skipped or
+    its schedule cancelled while PayPal held the draft. One conditional update
+    moves it, so a Send and a webhook at once mark it once. An item an approval
+    has claimed is left to that approval. Returns None if nothing moved.
+    """
+    if invoice.status not in SENT_STATUSES:
+        return None
+    item = session.exec(
+        select(ScheduledInvoice).where(
+            ScheduledInvoice.invoice_id == invoice.id, ScheduledInvoice.user_id == invoice.user_id
+        )
+    ).first()
+    if item is None:
+        return None
+    moved = session.exec(
+        update(ScheduledInvoice)
+        .where(ScheduledInvoice.id == item.id, ScheduledInvoice.status.in_(UNSENT_ITEM_STATUSES))
+        .values(status=ScheduledInvoiceStatus.SENT)
+    )
+    session.commit()
+    if moved.rowcount != 1:
+        return None
+    session.refresh(item)
+    schedule = session.get(Schedule, item.schedule_id)
+    if schedule is not None:
+        _finish_if_done(session, schedule)
+    return item
+
+
+def follow_sent(session: Session, invoice: Invoice) -> None:
+    """Start the repeat held on a sent invoice and mark its scheduled item SENT (issues #78, #79)."""
+    start_held_repeat(session, invoice)
+    mark_linked_item_sent(session, invoice)
+
+
+on_invoice_sent(follow_sent)
 
 
 def send_draft(
     session: Session, invoice: Invoice, gateway: PayPalGateway, *, warnings: list[str] | None = None
 ) -> Invoice:
-    """Send a draft PayPal holds but has not sent, then start its held repeat (issue #41).
+    """Send a draft PayPal holds but has not sent, then follow it up (issues #41, #79).
 
     The send reuses the PayPal invoice, so it never creates a second one.
+    Once it is sent, its held repeat starts and the scheduled item linked to
+    it is marked SENT.
     Raises ValueError if the invoice is not such a draft, InvoiceNotSent if
     PayPal refuses.
     """
     invoice = send_unsent_invoice(session, invoice, gateway, warnings=warnings)
-    start_held_repeat(session, invoice)
+    follow_sent(session, invoice)
     return invoice
 
 
@@ -478,6 +527,11 @@ def approve_scheduled(
     PayPal if PayPal does not hold it yet, sends it if PayPal holds it unsent,
     and marks the item sent if PayPal has sent it (issue #74).
 
+    A linked invoice counts as sent only in a sent status (SENT, OVERDUE or
+    paid). If it was cancelled or refunded before it was sent, the client was
+    never billed for this item, so the item is unlinked from it and a new
+    invoice is drafted and sent in its place (issue #79).
+
     An item whose schedule is not ACTIVE is refused. If the schedule is
     cancelled while PayPal is called and the call fails, the item stays
     CANCELLED (issue #77).
@@ -494,6 +548,10 @@ def approve_scheduled(
         raise ValueError("This scheduled invoice is already being approved.")
     try:
         invoice = session.get(Invoice, item.invoice_id) if item.invoice_id is not None else None
+        if invoice is not None and invoice.status != InvoiceStatus.DRAFT and invoice.status not in SENT_STATUSES:
+            # Closed before PayPal sent it, so nothing was billed. Leave it as
+            # it is and bill the item afresh (issue #79).
+            invoice = None
         if invoice is None:
             proposal = InvoiceProposal(
                 client_name=client.name,
@@ -509,7 +567,7 @@ def approve_scheduled(
             item.invoice_id = invoice.id
             session.add(item)
             session.commit()
-        if invoice.status != InvoiceStatus.DRAFT:
+        if invoice.status in SENT_STATUSES:
             # PayPal sent it after all, for example after a timeout; a webhook
             # or refresh has said so. Nothing more to send.
             pass
@@ -537,8 +595,22 @@ def approve_scheduled(
 
 
 def reject_scheduled(session: Session, item: ScheduledInvoice) -> ScheduledInvoice:
+    """Skip a pending item. Refused while its linked invoice is sent or still sendable (issue #79).
+
+    A draft PayPal holds unsent could still reach the client from its invoice
+    row, so the user sends it or cancels it in PayPal first. Skipping never
+    cancels anything in PayPal.
+    """
     if item.status != ScheduledInvoiceStatus.PENDING:
         raise ValueError("Only a pending scheduled invoice can be rejected.")
+    linked = session.get(Invoice, item.invoice_id) if item.invoice_id is not None else None
+    if linked is not None and linked.status in SENT_STATUSES:
+        raise ValueError("PayPal has already sent this invoice. Approve it to record it as sent.")
+    if linked is not None and linked.status == InvoiceStatus.DRAFT and linked.paypal_invoice_id:
+        raise ValueError(
+            f"PayPal holds invoice {linked.invoice_number} as an unsent draft. Send it from its "
+            "invoice row, or cancel it in PayPal and refresh it, before you skip this one."
+        )
     item.status = ScheduledInvoiceStatus.REJECTED
     session.add(item)
     session.commit()

@@ -1,4 +1,4 @@
-"""Invoice services for Duebell (issues #9, #11, #23, #24, #46, #74, #78). See ADRs 0005 and 0008.
+"""Invoice services for Duebell (issues #9, #11, #23, #24, #46, #74, #78, #79). See ADRs 0005 and 0008.
 
 Every read takes an ownership scope (app.ownership); creation records an owner.
 """
@@ -25,8 +25,9 @@ from app.validation import InvoiceProposal, proposal_to_cents
 PAID_STATUSES = {InvoiceStatus.PAID, InvoiceStatus.MARKED_AS_PAID}
 CLOSED_STATUSES = PAID_STATUSES | {InvoiceStatus.CANCELLED, InvoiceStatus.REFUNDED}
 KNOWN_STATUSES = set(InvoiceStatus)
-# The statuses of an invoice PayPal has sent. A repeat held on a draft starts
-# once the draft reaches one of them (issue #78).
+# The statuses of an invoice PayPal has sent. A repeat held on a draft starts,
+# and a scheduled item linked to it counts as sent, once the draft reaches one
+# of them (issues #78, #79).
 SENT_STATUSES = {InvoiceStatus.SENT, InvoiceStatus.OVERDUE} | PAID_STATUSES
 # Never part of a client's payment history (issue #46).
 NOT_HISTORY = {InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED}
@@ -400,30 +401,32 @@ def apply_status(invoice: Invoice, status: str) -> None:
         invoice.repeat_cycles = None
 
 
-HeldRepeatStarter = Callable[[Session, Invoice], object]
-_held_repeat_starter: HeldRepeatStarter | None = None
+SentHandler = Callable[[Session, Invoice], object]
+_sent_handler: SentHandler | None = None
 
 
-def on_held_repeat_sent(starter: HeldRepeatStarter) -> None:
-    """Name the function that starts a repeat held on a sent invoice (issue #78).
+def on_invoice_sent(handler: SentHandler) -> None:
+    """Name the function that follows up an invoice PayPal has sent (issues #78, #79).
 
-    app.schedules imports this module and registers its starter, so this
-    module can start a repeat without importing schedules back.
+    app.schedules imports this module and registers its handler, which starts
+    a held repeat and marks a linked scheduled item SENT, so this module can
+    do both without importing schedules back.
     """
-    global _held_repeat_starter
-    _held_repeat_starter = starter
+    global _sent_handler
+    _sent_handler = handler
 
 
-def start_held_repeat_if_sent(session: Session, invoice: Invoice) -> None:
-    """Start the repeat held on this invoice if it has been sent (issue #78).
+def follow_sent_invoice(session: Session, invoice: Invoice) -> None:
+    """Follow up this invoice if PayPal has sent it (issues #78, #79).
 
     Called after every status change commits, whatever moved the invoice:
-    the Send button, a webhook or a Refresh. The starter claims the hold with
-    one conditional update, so a race starts one schedule. A hold a crash left
-    on a sent invoice starts on the next webhook or Refresh.
+    the Send button, a webhook or a Refresh. The handler starts the repeat
+    held on the invoice and marks the scheduled item linked to it SENT. Each
+    step is one conditional update, so a race does it once, and a step a
+    crash missed runs on the next webhook or Refresh.
     """
-    if invoice.repeat_unit and invoice.status in SENT_STATUSES and _held_repeat_starter:
-        _held_repeat_starter(session, invoice)
+    if invoice.status in SENT_STATUSES and _sent_handler:
+        _sent_handler(session, invoice)
 
 
 def reject_drafts_if_closed(session: Session, invoice: Invoice) -> int:
@@ -452,7 +455,7 @@ def refresh_invoice(session: Session, invoice: Invoice, gateway) -> Invoice:
     reject_drafts_if_closed(session, invoice)
     session.commit()
     session.refresh(invoice)
-    start_held_repeat_if_sent(session, invoice)
+    follow_sent_invoice(session, invoice)
     return invoice
 
 
@@ -467,7 +470,7 @@ def simulate_payment(session: Session, invoice: Invoice, gateway) -> Invoice:
     reject_drafts_if_closed(session, invoice)
     session.commit()
     session.refresh(invoice)
-    start_held_repeat_if_sent(session, invoice)
+    follow_sent_invoice(session, invoice)
     return invoice
 
 
@@ -523,7 +526,7 @@ def handle_webhook(session: Session, gateway, headers: Mapping[str, str], body: 
     session.add(event)
     session.commit()
     if invoice:
-        start_held_repeat_if_sent(session, invoice)
+        follow_sent_invoice(session, invoice)
     return {"ok": True, "applied": applied, "status": status}
 
 
