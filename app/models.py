@@ -192,6 +192,10 @@ class Schedule(SQLModel, table=True):
     interval_count: int = 1
     # Recurring only: how many more invoices to queue. None repeats until cancelled.
     cycles_left: Optional[int] = None
+    # Recurring only: the date of the invoice that started the repeat. Each
+    # occurrence counts from it, so a repeat from the 31st keeps the month end
+    # (issue #43). None on a repeat an older build made.
+    starts_on: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
     status: str = ScheduleStatus.ACTIVE
     created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
 

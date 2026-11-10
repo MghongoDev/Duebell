@@ -13,7 +13,7 @@ Every table that holds a user's data has a `user_id` ([ADR 0008](../adr/0008-sig
 | `invoice` | A request for payment. | `invoice_number`, `paypal_invoice_id`, `amount_cents`, `currency`, `terms_days`, `issued_at`, `due_at`, `paid_at`, `status`, `risk_score`, `risk_level`, `risk_reasons`, `limited_data`. |
 | `reminder` | A drafted or sent **reminder**. | `invoice_id`, `draft_text`, `tone`, `status`, `sent_channels`, `sent_at`. At most one `PENDING` reminder per invoice. |
 | `event` | One PayPal webhook delivery. | `paypal_event_id` (primary key), `event_type`, `payload`. |
-| `schedule` | A **schedule**: a repeat or an **instalment plan**. | `kind`, `client_id`, `amount_cents`, `currency`, `terms_days`, `interval_unit`, `interval_count`, `cycles_left`, `status`. |
+| `schedule` | A **schedule**: a repeat or an **instalment plan**. | `kind`, `client_id`, `amount_cents`, `currency`, `terms_days`, `interval_unit`, `interval_count`, `cycles_left`, `starts_on`, `status`. |
 | `scheduledinvoice` | A **scheduled invoice**. | `schedule_id`, `sequence`, `amount_cents`, `issue_on`, `status`, `invoice_id`. `schedule_id` and `sequence` together are unique. |
 | `riskcomparison` | One refit of the **risk comparison**. | `status`, `rows_used`, `late_count`, `test_rows`, `baseline_accuracy`, `baseline_auc`, `logistic_accuracy`, `logistic_auc`, `message`. |
 
@@ -68,7 +68,7 @@ The unique index `ux_reminder_pending_invoice` allows one `PENDING` reminder per
 | `DONE` | Has nothing left to produce and nothing open. |
 | `CANCELLED` | Stopped by the user. |
 
-`kind` is `RECURRING` or `INSTALMENT`. For a repeat, `cycles_left` counts the invoices still to queue, or is empty for no end.
+`kind` is `RECURRING` or `INSTALMENT`. For a repeat, `cycles_left` counts the invoices still to queue, or is empty for no end. `starts_on` is the date of the invoice that started a repeat. Occurrence n falls n intervals after it, clamped to the length of the month. A repeat from an older build has no `starts_on`, so it counts from its earliest scheduled invoice.
 
 ### Scheduled invoice
 

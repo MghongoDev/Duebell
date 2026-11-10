@@ -1,4 +1,4 @@
-"""Recurring invoices and instalment plans (issues #24, #25, #39, #40; ADRs 0003, 0007, 0008).
+"""Recurring invoices and instalment plans (issues #24, #25, #39, #40, #43; ADRs 0003, 0007, 0008).
 
 A schedule is the rule: repeat an invoice every interval, or split one amount
 into instalments. Each future invoice is a ScheduledInvoice. The scan moves due
@@ -135,7 +135,13 @@ def _check_interval(unit: str, count: int) -> None:
 
 
 def _new_schedule(
-    session: Session, basis: ScheduleBasis, kind: ScheduleKind, unit: str, count: int, cycles_left: int | None
+    session: Session,
+    basis: ScheduleBasis,
+    kind: ScheduleKind,
+    unit: str,
+    count: int,
+    cycles_left: int | None,
+    starts_on: datetime | None = None,
 ) -> Schedule:
     _check_interval(unit, count)
     schedule = Schedule(
@@ -149,6 +155,7 @@ def _new_schedule(
         interval_unit=unit,
         interval_count=count,
         cycles_left=cycles_left,
+        starts_on=starts_on,
     )
     session.add(schedule)
     session.commit()
@@ -161,15 +168,23 @@ def create_recurring(
     basis: ScheduleBasis,
     *,
     interval_unit: str,
-    first_issue: datetime,
+    start: datetime,
     interval_count: int = 1,
     cycles: int | None = None,
 ) -> Schedule:
-    """Repeat an invoice. `first_issue` is the next one after the invoice just sent."""
+    """Repeat an invoice. `start` is the date of the invoice just sent.
+
+    Occurrence n falls n intervals after `start`, clamped to the month's
+    length, so a repeat from 31 January runs on 28 February, then 31 March
+    (issue #43).
+    """
     if cycles is not None and not 1 <= cycles <= MAX_CYCLES:
         raise ValueError(f"The number of repeats must be between 1 and {MAX_CYCLES}.")
-    schedule = _new_schedule(session, basis, ScheduleKind.RECURRING, interval_unit, interval_count, cycles)
-    _queue_next(session, schedule, first_issue, sequence=1)
+    start = as_utc(start)
+    schedule = _new_schedule(
+        session, basis, ScheduleKind.RECURRING, interval_unit, interval_count, cycles, starts_on=start
+    )
+    _queue_next(session, schedule, _issue_on(session, schedule, 1), sequence=1)
     session.commit()
     return schedule
 
@@ -224,6 +239,25 @@ def _queue_next(session: Session, schedule: Schedule, issue_on: datetime, sequen
     )
 
 
+def _issue_on(session: Session, schedule: Schedule, sequence: int) -> datetime:
+    """The date of a repeat's occurrence, counted from its start (issue #43).
+
+    Counting from the start, not from the previous date, keeps the day of the
+    month: a date clamped to 28 February does not pull later months back to
+    the 28th. A repeat an older build made has no start, so it counts from its
+    earliest scheduled invoice instead.
+    """
+    unit, count = schedule.interval_unit, schedule.interval_count
+    if schedule.starts_on is not None:
+        return add_interval(as_utc(schedule.starts_on), unit, count * sequence)
+    first = session.exec(
+        select(ScheduledInvoice)
+        .where(ScheduledInvoice.schedule_id == schedule.id)
+        .order_by(ScheduledInvoice.sequence)
+    ).first()
+    return add_interval(as_utc(first.issue_on), unit, count * (sequence - first.sequence))
+
+
 def _open_items(session: Session, schedule: Schedule) -> list[ScheduledInvoice]:
     query = select(ScheduledInvoice).where(
         ScheduledInvoice.schedule_id == schedule.id,
@@ -254,8 +288,8 @@ def draft_scheduled(session: Session, now: datetime | None = None, *, scope: Sco
         if schedule.kind == ScheduleKind.RECURRING:
             # Read the schedule again inside the claim, so cycles_left is current.
             session.refresh(schedule)
-            next_issue = add_interval(as_utc(item.issue_on), schedule.interval_unit, schedule.interval_count)
-            _queue_next(session, schedule, next_issue, item.sequence + 1)
+            next_sequence = item.sequence + 1
+            _queue_next(session, schedule, _issue_on(session, schedule, next_sequence), next_sequence)
         try:
             session.commit()
         except IntegrityError:
