@@ -2,9 +2,11 @@
 
 from datetime import timedelta
 
+import pytest
 from sqlalchemy import inspect, text
 from sqlmodel import Session, select
 
+from app.mailer import MailError, MockMailer
 from app.models import Invoice, Reminder, init_db, make_engine, utcnow
 from app.reminders import draft_reminders, reject_reminder, send_reminder
 from tests.test_reminders import seed_invoice
@@ -72,6 +74,57 @@ def test_a_rejected_draft_blocks_nothing(client):
         reject_reminder(session, draft)
         [again] = _scan(client, session)
     assert again.stage == "OVERDUE"
+
+
+def _partly_send_then_reject(client, session, reminder):
+    """Approve for both channels; PayPal delivers, email fails; then reject (issue #76)."""
+    mailer = MockMailer()
+    mailer.fail_with = "smtp down"
+    with pytest.raises(MailError):
+        send_reminder(session, reminder, client.app.state.gateway, mailer, "both")
+    session.refresh(reminder)
+    assert reminder.sent_channels == "paypal"
+    reject_reminder(session, reminder)
+
+
+def test_a_partly_sent_then_rejected_reminder_blocks_its_stage(client):
+    seed_invoice(client, due_days=-3)
+    gateway = client.app.state.gateway
+    with Session(client.app.state.engine) as session:
+        [draft] = _scan(client, session)
+        _partly_send_then_reject(client, session, draft)
+        assert _scan(client, session) == []
+        assert _scan(client, session, utcnow() + timedelta(days=30)) == []
+    assert len(gateway.sent_reminders) == 1
+
+
+def test_a_partly_sent_before_due_reminder_still_lets_the_overdue_stage_draft(client):
+    seed_invoice(client, due_days=2, risk="MEDIUM")
+    with Session(client.app.state.engine) as session:
+        [friendly] = _scan(client, session)
+        _partly_send_then_reject(client, session, friendly)
+        assert _scan(client, session) == []
+        [firm] = _scan(client, session, utcnow() + timedelta(days=30))
+    assert firm.stage == "OVERDUE"
+
+
+@pytest.mark.parametrize("channels", ["paypal", "email", "email,paypal"])
+def test_a_rejected_reminder_any_channel_delivered_counts_as_sent(client, channels):
+    invoice_id = seed_invoice(client, due_days=-3)
+    with Session(client.app.state.engine) as session:
+        session.add(
+            Reminder(
+                user_id=client.user_id,
+                invoice_id=invoice_id,
+                draft_text="partly sent",
+                stage="OVERDUE",
+                status="REJECTED",
+                sent_channels=channels,
+                sent_at=utcnow(),
+            )
+        )
+        session.commit()
+        assert _scan(client, session) == []
 
 
 def _legacy_sent_reminder(client, invoice_id, created_at):

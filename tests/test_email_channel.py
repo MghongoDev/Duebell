@@ -159,3 +159,12 @@ def test_feed_keeps_a_paypal_send_even_if_the_draft_is_later_rejected(client):
     page = client.get("/").text
     assert "Reminder sent via PayPal" in page
     assert "Reminder sent via PayPal and email" not in page
+
+
+def test_a_rejected_row_says_which_channel_already_sent_it(client):
+    reminder_id = pending_reminder(client)
+    client.app.state.mailer.fail_with = "The email could not be sent: SMTPServerDisconnected. Try again."
+    assert approve(client, reminder_id, "both").status_code == 502
+    client.post(f"/api/reminders/{reminder_id}/reject")
+    page = client.get("/").text
+    assert "Sent via PayPal before the rest was rejected." in page

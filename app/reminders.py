@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select, update
+from sqlmodel import Session, or_, select, update
 
 from app.config import Settings
 from app.mailer import Mailer
@@ -114,7 +114,11 @@ def _blocked_invoice_ids(session: Session) -> set[int]:
 
 
 def _sent_stages(session: Session) -> set[tuple[int, ReminderStage]]:
-    """(invoice, stage) pairs that already have a sent reminder (issue #42).
+    """(invoice, stage) pairs that already have a sent reminder (issues #42, #76).
+
+    A reminder counts as sent once any channel delivered it, whatever its
+    status: a draft PayPal sent and the user then rejected still reached the
+    client. A rejected draft no channel delivered counts for nothing.
 
     A reminder from a build before issue #42 has no stage. It counts in the
     stage it would get if drafted at its created_at: overdue if that was a
@@ -123,7 +127,7 @@ def _sent_stages(session: Session) -> set[tuple[int, ReminderStage]]:
     rows = session.exec(
         select(Reminder, Invoice)
         .join(Invoice, Invoice.id == Reminder.invoice_id)
-        .where(Reminder.status == ReminderStatus.SENT)
+        .where(or_(Reminder.status == ReminderStatus.SENT, Reminder.sent_channels != ""))
     ).all()
     return {
         (reminder.invoice_id, ReminderStage(reminder.stage or reminder_stage(invoice, reminder.created_at)))
@@ -141,8 +145,10 @@ def draft_reminders(
     """Draft one reminder for each invoice that needs one. Nothing is sent here.
 
     An invoice gets at most one sent reminder per stage: one before it is due
-    and one once it is overdue. A pending draft blocks any new draft; a
-    rejected one blocks nothing (issue #42).
+    and one once it is overdue. A reminder any channel delivered counts as
+    sent, even if the user later rejected the rest of it (issue #76). A
+    pending draft blocks any new draft; a rejected one no channel delivered
+    blocks nothing (issue #42).
 
     Each draft is committed on its own. If another scan drafted one for the
     same invoice first, the database refuses a second pending draft and this
