@@ -4,7 +4,8 @@ The seed belongs to a demo user. --if-empty seeds only a database with no
 users, and --require-password refuses the published default password, which
 is how a hosted instance starts. A bare rerun on a seeded database changes
 nothing, and an unusable DEMO_PASSWORD exits with one line, not a traceback
-(issue #86).
+(issue #86). --reset checks the password before it deletes the database, so a
+bad one leaves the data in place (issue #102).
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlmodel import Session, select
 
-from app.auth import AuthError, create_user
+from app.auth import AuthError, create_user, validate_password
 from app.config import get_settings
 from app.models import Client, Invoice, InvoiceStatus, User, init_db, make_engine, utcnow
 from app.risk import HistoryInvoice, score_invoice
@@ -63,12 +64,22 @@ def demo_user(session: Session, require_password: bool = False) -> User:
     user = session.exec(select(User).where(User.email == DEMO_EMAIL)).first()
     if user:
         return user
+    return create_user(session, DEMO_EMAIL, demo_password(require_password))
+
+
+def demo_password(require_password: bool = False) -> str:
+    """DEMO_PASSWORD, or the default if unset. Raise before anything is written if it is unusable (issue #102).
+
+    Exits if require_password is set and DEMO_PASSWORD is unset, and raises
+    AuthError if create_user would refuse the password.
+    """
     password = os.getenv("DEMO_PASSWORD", "")
     if not password:
         if require_password:
             raise SystemExit("Set DEMO_PASSWORD. A hosted demo must not use the published default.")
         password = DEFAULT_DEMO_PASSWORD
-    return create_user(session, DEMO_EMAIL, password)
+    validate_password(password)
+    return password
 
 
 def seed_if_empty(session: Session, require_password: bool = False) -> dict | None:
@@ -169,12 +180,14 @@ def main() -> None:
     args = parser.parse_args()
 
     settings = get_settings()
-    if args.reset:
-        reset_database(settings)
-    engine = make_engine(settings.database_url)
-    init_db(engine)
-    with Session(engine) as session:
-        try:
+    try:
+        if args.reset:
+            # Check the password before the delete, so a bad one leaves the data in place (issue #102).
+            demo_password(args.require_password)
+            reset_database(settings)
+        engine = make_engine(settings.database_url)
+        init_db(engine)
+        with Session(engine) as session:
             if args.if_empty:
                 summary = seed_if_empty(session, args.require_password)
                 if summary is None:
@@ -185,9 +198,9 @@ def main() -> None:
                 return
             else:
                 summary = seed(session, demo_user(session, args.require_password).id)
-        except AuthError as error:
-            # create_user checks the password before it writes, so nothing is left behind.
-            raise SystemExit(f"DEMO_PASSWORD is not usable: {error}") from None
+    except AuthError as error:
+        # The password is checked before any delete or write, so nothing is lost or left behind.
+        raise SystemExit(f"DEMO_PASSWORD is not usable: {error}") from None
     print(f"Seeded {summary['clients']} clients and {summary['invoices']} invoices.")
     print(f"Sign in as {DEMO_EMAIL}. The password is DEMO_PASSWORD, or {DEFAULT_DEMO_PASSWORD} if unset.")
     print("Training data is synthetic. The risk model is a demonstration, not a validated predictor.")
