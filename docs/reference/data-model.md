@@ -11,7 +11,7 @@ Every table that holds a user's data has a `user_id` ([ADR 0008](../adr/0008-sig
 | `user` | A person who signs in. | `email` (unique), `password_hash` (scrypt, with its cost). |
 | `client` | Someone a user bills. | `name`, `email`. Email is unique per user, so two users may bill the same address. |
 | `invoice` | A request for payment. | `invoice_number`, `paypal_invoice_id`, `amount_cents`, `currency`, `terms_days`, `issued_at`, `due_at`, `paid_at`, `status`, `risk_score`, `risk_level`, `risk_reasons`, `limited_data`. |
-| `reminder` | A drafted or sent **reminder**. | `invoice_id`, `draft_text`, `tone`, `status`, `sent_channels`, `sent_at`. At most one `PENDING` reminder per invoice. |
+| `reminder` | A drafted or sent **reminder**. | `invoice_id`, `draft_text`, `tone`, `stage`, `status`, `sent_channels`, `sent_at`. At most one `PENDING` reminder per invoice. |
 | `event` | One PayPal webhook delivery. | `paypal_event_id` (primary key), `event_type`, `payload`. |
 | `schedule` | A **schedule**: a repeat or an **instalment plan**. | `kind`, `client_id`, `amount_cents`, `currency`, `terms_days`, `interval_unit`, `interval_count`, `cycles_left`, `status`. |
 | `scheduledinvoice` | A **scheduled invoice**. | `schedule_id`, `sequence`, `amount_cents`, `issue_on`, `status`, `invoice_id`. `schedule_id` and `sequence` together are unique. |
@@ -29,6 +29,7 @@ Each set of values below has its own type in the code. The database stores the p
 | --- | --- |
 | Invoice status | `InvoiceStatus` |
 | Reminder status | `ReminderStatus` |
+| Reminder stage | `ReminderStage` |
 | Schedule status, schedule kind | `ScheduleStatus`, `ScheduleKind` |
 | Schedule interval | `IntervalUnit` |
 | Scheduled invoice status | `ScheduledInvoiceStatus` |
@@ -57,6 +58,8 @@ A status only moves forward. A webhook or refresh never moves an invoice out of 
 | `REJECTED` | Dropped without sending. A later scan may draft a new one. |
 
 `sent_channels` lists the channels that delivered the reminder, for example `paypal,email`. A retry skips them. `sent_at` is when a channel last delivered.
+
+`stage` is the **stage** the invoice was in when the scan drafted the reminder: `BEFORE_DUE`, or `OVERDUE` once the invoice is a full day past its `due_at`. An invoice gets at most one `SENT` reminder per stage. A `PENDING` reminder blocks any new draft for its invoice, and a `REJECTED` one blocks nothing. A row from a build before stages has an empty `stage`. The scan counts it as `OVERDUE` if its `created_at` is a full day past the invoice's `due_at`, and as `BEFORE_DUE` otherwise. Startup adds the column to an older database and leaves it empty on old rows.
 
 The unique index `ux_reminder_pending_invoice` allows one `PENDING` reminder per invoice. If two scans draft for the same invoice at once, the database refuses the second draft and that scan skips the invoice.
 

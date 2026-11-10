@@ -56,6 +56,10 @@ _Avoid_: Cold-start score, default score
 A message that asks a client to pay an unpaid invoice. Duebell drafts it; a human approves it and picks the channel: PayPal, email, or both.
 _Avoid_: Nudge, follow-up, chase
 
+**Stage**:
+Where an invoice stood when its reminder was drafted: before due, or overdue once it is a full day past its due date. An invoice gets at most one sent reminder in each stage. Stage is separate from tone: a High-risk invoice's before-due reminder is already firm.
+_Avoid_: Phase, round, reminder level
+
 **Scan**:
 A pass that finds eligible invoices and creates pending reminder drafts. It never sends.
 _Avoid_: Batch, job, run

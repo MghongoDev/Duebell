@@ -1,4 +1,4 @@
-"""Database models and engine setup for Duebell (issues #9, #22, #24, #25, #26, #31, #40).
+"""Database models and engine setup for Duebell (issues #9, #22, #24, #25, #26, #31, #40, #42).
 
 Every table that holds a user's data has a user_id (ADR 0008). init_db adds
 columns and indexes a newer model declares to an older database, so a demo
@@ -65,6 +65,13 @@ class ReminderStatus(StrEnum):
     PENDING = "PENDING"
     SENT = "SENT"
     REJECTED = "REJECTED"
+
+
+class ReminderStage(StrEnum):
+    """Where an invoice stood when its reminder was drafted (issue #42)."""
+
+    BEFORE_DUE = "BEFORE_DUE"
+    OVERDUE = "OVERDUE"
 
 
 class ScheduleKind(StrEnum):
@@ -162,6 +169,9 @@ class Reminder(SQLModel, table=True):
     # Comma-separated channels that have already delivered this reminder,
     # e.g. "paypal" or "paypal,email". A retry skips them.
     sent_channels: str = ""
+    # BEFORE_DUE or OVERDUE, set when drafted (issue #42). A row from an older
+    # build has none; the scan infers it from created_at and the due date.
+    stage: Optional[str] = None
 
 
 class Event(SQLModel, table=True):

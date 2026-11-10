@@ -1,4 +1,4 @@
-"""Reminder drafting, editing, approval, and rejection (issues #15, #24, #26, #40; ADR 0003).
+"""Reminder drafting, editing, approval, and rejection (issues #15, #24, #26, #40, #42; ADR 0003).
 
 Scanning only creates drafts. A human must edit or approve a draft before
 Duebell asks PayPal to send a reminder. The draft uses only facts already on
@@ -17,14 +17,13 @@ from sqlmodel import Session, select
 
 from app.config import Settings
 from app.mailer import Mailer
-from app.models import Client, Invoice, InvoiceStatus, Reminder, ReminderStatus, utcnow
+from app.models import Client, Invoice, InvoiceStatus, Reminder, ReminderStage, ReminderStatus, utcnow
 from app.ownership import Scope, owned
 from app.paypal import PayPalGateway, PayPalTimeout
 from app.risk import RiskLevel
 from app.services import CLOSED_STATUSES, money, reject_drafts_if_closed
 
 REMINDABLE_STATUSES = {InvoiceStatus.SENT, InvoiceStatus.OVERDUE}
-BLOCKING_REMINDER_STATUSES = {ReminderStatus.PENDING, ReminderStatus.SENT}
 MAX_DRAFT_CHARS = 2_000
 
 
@@ -42,6 +41,17 @@ class Channel(StrEnum):
 CHANNELS = tuple(Channel)
 
 
+def reminder_stage(invoice: Invoice, now: datetime) -> ReminderStage:
+    """The stage a reminder drafted at `now` belongs to (issue #42).
+
+    It matches the reminder's opening line: OVERDUE once the invoice is a full
+    day past its due date, BEFORE_DUE until then.
+    """
+    if (now - invoice.due_at).days > 0:
+        return ReminderStage.OVERDUE
+    return ReminderStage.BEFORE_DUE
+
+
 def reminder_text(
     invoice: Invoice,
     client: Client,
@@ -53,7 +63,7 @@ def reminder_text(
     tone = "firm" if overdue_days > 14 or invoice.risk_level == RiskLevel.HIGH else "friendly"
     signature = settings.paypal_invoicer_email or "Duebell"
 
-    if overdue_days > 0:
+    if reminder_stage(invoice, now) is ReminderStage.OVERDUE:
         opening = (
             f"Invoice {invoice.invoice_number} for {money(invoice.amount_cents, invoice.currency)} "
             f"{invoice.currency} was due on {invoice.due_at:%d %b %Y} and is still open."
@@ -94,10 +104,27 @@ def is_due_for_reminder(invoice: Invoice, settings: Settings, now: datetime | No
 
 
 def _blocked_invoice_ids(session: Session) -> set[int]:
-    reminders = session.exec(
-        select(Reminder).where(Reminder.status.in_(BLOCKING_REMINDER_STATUSES))
-    ).all()
+    """Invoices with a pending draft. It blocks any new draft (ADR 0003)."""
+    reminders = session.exec(select(Reminder).where(Reminder.status == ReminderStatus.PENDING)).all()
     return {reminder.invoice_id for reminder in reminders}
+
+
+def _sent_stages(session: Session) -> set[tuple[int, ReminderStage]]:
+    """(invoice, stage) pairs that already have a sent reminder (issue #42).
+
+    A reminder from a build before issue #42 has no stage. It counts in the
+    stage it would get if drafted at its created_at: overdue if that was a
+    full day past the due date, before due otherwise.
+    """
+    rows = session.exec(
+        select(Reminder, Invoice)
+        .join(Invoice, Invoice.id == Reminder.invoice_id)
+        .where(Reminder.status == ReminderStatus.SENT)
+    ).all()
+    return {
+        (reminder.invoice_id, ReminderStage(reminder.stage or reminder_stage(invoice, reminder.created_at)))
+        for reminder, invoice in rows
+    }
 
 
 def draft_reminders(
@@ -109,6 +136,10 @@ def draft_reminders(
 ) -> list[Reminder]:
     """Draft one reminder for each invoice that needs one. Nothing is sent here.
 
+    An invoice gets at most one sent reminder per stage: one before it is due
+    and one once it is overdue. A pending draft blocks any new draft; a
+    rejected one blocks nothing (issue #42).
+
     Each draft is committed on its own. If another scan drafted one for the
     same invoice first, the database refuses a second pending draft and this
     scan skips that invoice (issue #40).
@@ -116,11 +147,16 @@ def draft_reminders(
     closed = owned(select(Invoice).where(Invoice.status.in_(CLOSED_STATUSES)), Invoice, scope)
     if sum(reject_drafts_if_closed(session, invoice) for invoice in session.exec(closed).all()):
         session.commit()
+    now = now or utcnow()
     blocked = _blocked_invoice_ids(session)
+    sent = _sent_stages(session)
     created: list[Reminder] = []
     query = owned(select(Invoice).where(Invoice.status.in_(REMINDABLE_STATUSES)), Invoice, scope)
     for invoice in session.exec(query).all():
         if invoice.id in blocked or not is_due_for_reminder(invoice, settings, now):
+            continue
+        stage = reminder_stage(invoice, now)
+        if (invoice.id, stage) in sent:
             continue
         # A draft is only useful if approving it can reach PayPal.
         if not invoice.paypal_invoice_id:
@@ -134,6 +170,7 @@ def draft_reminders(
             invoice_id=invoice.id,
             draft_text=text,
             tone=tone,
+            stage=stage,
             status=ReminderStatus.PENDING,
         )
         session.add(reminder)
