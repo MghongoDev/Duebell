@@ -3,7 +3,8 @@
 Standard library only. Passwords use scrypt with a per-user salt. The session
 is an HMAC-signed cookie holding the user id and an expiry; the server keeps
 no session table. The cookie is HttpOnly and SameSite=Lax, which also stops
-other sites from posting forms with it.
+other sites from posting forms with it. Sign-in itself needs no cookie, so the
+route also refuses a post whose Origin names another site (issue #45).
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ MIN_PASSWORD_CHARS = 10
 SCRYPT = {"n": 2**14, "r": 8, "p": 1, "dklen": 32}
 MAX_FAILURES = 5
 LOCKOUT_SECONDS = 15 * 60
+MAX_LOCKOUT_ENTRIES = 10_000
+SWEEP_SECONDS = 60
 
 
 class AuthError(ValueError):
@@ -79,37 +82,69 @@ _DUMMY_HASH = hash_password(secrets.token_urlsafe(16))
 
 
 class Lockout:
-    """Count recent failures per email, in memory, for one process."""
+    """Count recent attempts per email, in memory, for one process.
 
-    def __init__(self) -> None:
-        self._failures: dict[str, list[float]] = {}
+    An attempt is counted before its password is checked, so attempts that
+    arrive together cannot all pass the check (issue #45). A success clears
+    the count. Entries older than LOCKOUT_SECONDS are swept out, and the table
+    holds at most `max_entries` emails.
+    """
+
+    def __init__(self, max_entries: int = MAX_LOCKOUT_ENTRIES) -> None:
+        self._attempts: dict[str, list[float]] = {}
         self._lock = Lock()
+        self._max_entries = max_entries
+        self._last_sweep = 0.0
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._attempts)
 
     def _recent(self, email: str, now: float) -> list[float]:
-        return [at for at in self._failures.get(email, []) if now - at < LOCKOUT_SECONDS]
+        return [at for at in self._attempts.get(email, []) if now - at < LOCKOUT_SECONDS]
 
-    def locked(self, email: str) -> bool:
-        with self._lock:
-            return len(self._recent(email, time.time())) >= MAX_FAILURES
+    def _sweep(self, now: float) -> None:
+        """Drop expired entries, then make room for one more email if the table is full."""
+        self._last_sweep = now
+        for email in list(self._attempts):
+            recent = self._recent(email, now)
+            if recent:
+                self._attempts[email] = recent
+            else:
+                del self._attempts[email]
+        while len(self._attempts) >= self._max_entries:
+            # Evict an unlocked email first, so a flood of new emails cannot free a locked one.
+            unlocked = [email for email, times in self._attempts.items() if len(times) < MAX_FAILURES]
+            pool = unlocked or list(self._attempts)
+            del self._attempts[min(pool, key=lambda email: self._attempts[email][-1])]
 
-    def fail(self, email: str) -> None:
+    def attempt(self, email: str) -> bool:
+        """Count one attempt for `email`. False, and nothing counted, if it is locked."""
         with self._lock:
             now = time.time()
-            self._failures[email] = self._recent(email, now) + [now]
+            if now - self._last_sweep >= SWEEP_SECONDS or (
+                email not in self._attempts and len(self._attempts) >= self._max_entries
+            ):
+                self._sweep(now)
+            recent = self._recent(email, now)
+            if len(recent) >= MAX_FAILURES:
+                self._attempts[email] = recent
+                return False
+            self._attempts[email] = recent + [now]
+            return True
 
     def clear(self, email: str) -> None:
         with self._lock:
-            self._failures.pop(email, None)
+            self._attempts.pop(email, None)
 
 
 def authenticate(session: Session, email: str, password: str, lockout: Lockout) -> User:
     email = email.strip().lower()
-    if lockout.locked(email):
+    if not lockout.attempt(email):
         raise AuthError("Too many failed attempts. Wait 15 minutes and try again.")
     user = session.exec(select(User).where(User.email == email)).first()
     valid = check_password(password, user.password_hash if user else _DUMMY_HASH)
     if not user or not valid:
-        lockout.fail(email)
         raise AuthError("That email and password do not match.")
     lockout.clear(email)
     return user
