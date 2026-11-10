@@ -49,9 +49,9 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 
 | Method | Path | Does |
 | --- | --- | --- |
-| `POST` | `/api/scheduled/{item_id}/approve` | Creates and sends a pending scheduled invoice. The item is linked to its invoice before PayPal is called, so a retry never creates a second one: if an earlier try saved the invoice but stopped before PayPal created it, creates that one in PayPal; if PayPal holds it unsent, sends it; if PayPal has since sent it, marks the item sent. Returns `status`, `invoice_id`, and a `warning` if PayPal did not confirm the send in time. `409` if the item is not pending or another approval holds it. `502` if PayPal fails; the item stays pending. |
+| `POST` | `/api/scheduled/{item_id}/approve` | Creates and sends a pending scheduled invoice. The item is linked to its invoice before PayPal is called, so a retry never creates a second one: if an earlier try saved the invoice but stopped before PayPal created it, creates that one in PayPal; if PayPal holds it unsent, sends it; if PayPal has since sent it, marks the item sent. Returns `status`, `invoice_id`, and a `warning` if PayPal did not confirm the send in time. `409` if the item is not pending, another approval holds it, or its schedule is not active. `502` if PayPal fails; the item goes back to pending, unless its schedule was cancelled meanwhile, when it stays cancelled. |
 | `POST` | `/api/scheduled/{item_id}/reject` | Skips this invoice. A repeat carries on. |
-| `POST` | `/api/schedules/{schedule_id}/cancel` | Stops the schedule and cancels its upcoming and pending invoices. Sent invoices stay as they are. |
+| `POST` | `/api/schedules/{schedule_id}/cancel` | Stops the schedule and cancels its upcoming and pending invoices, and any an approval is sending. Sent invoices stay as they are. |
 
 ## PayPal webhook
 

@@ -1,4 +1,4 @@
-"""Recurring invoices and instalment plans (issues #24, #25, #39, #40, #43, #74, #78; ADRs 0003, 0007, 0008).
+"""Recurring invoices and instalment plans (issues #24, #25, #39, #40, #43, #74, #77, #78; ADRs 0003, 0007, 0008).
 
 A schedule is the rule: repeat an invoice every interval, or split one amount
 into instalments. Each future invoice is a ScheduledInvoice. The scan moves due
@@ -403,28 +403,46 @@ def _claim(session: Session, item: ScheduledInvoice) -> bool:
 
 
 def _release(session: Session, item: ScheduledInvoice) -> None:
+    """Put a claimed item back to PENDING after a failed approval (issue #77).
+
+    One conditional update moves it only if it is still SENDING. If its
+    schedule was cancelled while PayPal was called, it stays CANCELLED. The
+    link to its invoice is kept, so a draft PayPal holds unsent stays with the
+    user, who can send it from its row or leave it.
+    """
     session.rollback()
-    session.refresh(item)
-    item.status = ScheduledInvoiceStatus.PENDING
-    session.add(item)
+    _unclaim(session, item)
+
+
+def _unclaim(session: Session, item: ScheduledInvoice) -> None:
+    """Move SENDING back to PENDING in one conditional update, then commit (issue #77)."""
+    session.exec(
+        update(ScheduledInvoice)
+        .where(ScheduledInvoice.id == item.id, ScheduledInvoice.status == ScheduledInvoiceStatus.SENDING)
+        .values(status=ScheduledInvoiceStatus.PENDING)
+    )
     session.commit()
+    session.refresh(item)
 
 
 def _drop_unpublished(session: Session, item: ScheduledInvoice) -> None:
     """Release the item after PayPal refused to create its invoice (issue #74).
 
     As on the form, the local draft PayPal never took is deleted. The item is
-    unlinked in the same commit, so the next approval drafts afresh.
+    unlinked in the same commit, so the next approval drafts afresh. The item
+    goes back to PENDING only if it is still SENDING; one whose schedule was
+    cancelled meanwhile stays CANCELLED, its draft deleted all the same
+    (issue #77).
     """
     session.rollback()
     session.refresh(item)
     linked = session.get(Invoice, item.invoice_id) if item.invoice_id is not None else None
     if linked is not None and linked.status == InvoiceStatus.DRAFT and not linked.paypal_invoice_id:
         item.invoice_id = None
+        session.add(item)
         session.delete(linked)
-    item.status = ScheduledInvoiceStatus.PENDING
-    session.add(item)
-    session.commit()
+        session.flush()
+    _unclaim(session, item)
 
 
 def release_interrupted(session: Session) -> int:
@@ -459,6 +477,10 @@ def approve_scheduled(
     then picks up where the last one stopped: it creates a linked draft in
     PayPal if PayPal does not hold it yet, sends it if PayPal holds it unsent,
     and marks the item sent if PayPal has sent it (issue #74).
+
+    An item whose schedule is not ACTIVE is refused. If the schedule is
+    cancelled while PayPal is called and the call fails, the item stays
+    CANCELLED (issue #77).
     """
     if item.status != ScheduledInvoiceStatus.PENDING:
         raise ValueError("Only a pending scheduled invoice can be approved.")
@@ -466,6 +488,8 @@ def approve_scheduled(
     client = session.get(Client, schedule.client_id) if schedule else None
     if schedule is None or client is None:
         raise ValueError("This scheduled invoice has lost its client.")
+    if schedule.status != ScheduleStatus.ACTIVE:
+        raise ValueError("This schedule is no longer active.")
     if not _claim(session, item):
         raise ValueError("This scheduled invoice is already being approved.")
     try:
@@ -562,7 +586,8 @@ def schedule_rows(session: Session, scope: Scope) -> dict:
         name = client.name if client else ""
         own = by_schedule.get(schedule.id, [])
         for item in own:
-            if item.status == ScheduledInvoiceStatus.PENDING:
+            # Only an active schedule's items can be approved (issue #77).
+            if item.status == ScheduledInvoiceStatus.PENDING and schedule.status == ScheduleStatus.ACTIVE:
                 pending.append(
                     {
                         "id": item.id,
