@@ -37,6 +37,7 @@ Find the message you see, then the fix.
 | You see | Cause | Fix |
 | --- | --- | --- |
 | Paid in PayPal, still `SENT` in Duebell | The webhook did not arrive or failed its check. | Click **Refresh** on the row. Check `PAYPAL_WEBHOOK_ID`. |
+| Webhook returns `401 webhooks are off in mock mode` | `PAYPAL_MODE=mock` and `MOCK_WEBHOOKS` is off. | For a local demo, set `MOCK_WEBHOOKS=true`. On a public host, leave it off. |
 | Webhook returns `400 invalid signature` | Wrong or missing `PAYPAL_WEBHOOK_ID`. | Register again with `scripts/register_webhook.py` and update the ID. |
 
 ## Risk comparison

@@ -54,6 +54,8 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 
 ## PayPal webhook
 
+In `mock` mode the webhook returns `401` with `{"ok": false, "error": "webhooks are off in mock mode"}` and stores nothing, unless `MOCK_WEBHOOKS` is on ([configuration](configuration.md#modes)).
+
 | Method | Path | Does |
 | --- | --- | --- |
 | `POST` | `/webhooks/paypal` | Public. Checks the signature through PayPal before anything else. Stores each event once by its PayPal event ID, so a replay changes nothing. `400` for a bad signature, a body that is not UTF-8, invalid JSON or a missing event ID. `413` above 1 MB. |

@@ -45,7 +45,7 @@ def one_cycle(settings) -> dict:
         summary = seed(session)
     check(summary == {"clients": EXPECTED_CLIENTS, "invoices": EXPECTED_INVOICES}, f"seed gave {summary}")
 
-    gateway = MockPayPal()
+    gateway = MockPayPal(accepts_webhooks=settings.mock_webhooks)
     client = TestClient(create_app(settings=settings, engine=engine, gateway=gateway))
     signed_in = client.post(
         "/login", data={"email": DEMO_EMAIL, "password": DEFAULT_DEMO_PASSWORD}, follow_redirects=False
@@ -97,7 +97,9 @@ def one_cycle(settings) -> dict:
 
 def main() -> None:
     os.environ.pop("DEMO_PASSWORD", None)
-    settings = replace(get_settings(), database_url=SCRATCH_DB, llm_mode="mock", paypal_mode="mock")
+    settings = replace(
+        get_settings(), database_url=SCRATCH_DB, llm_mode="mock", paypal_mode="mock", mock_webhooks=True
+    )
     try:
         for cycle in range(1, 4):
             summary = one_cycle(settings)

@@ -23,7 +23,8 @@ A webhook event belongs to the owner of the invoice it touches.
 
 ## Other limits
 
-- Duebell asks PayPal to check each webhook's signature before changing anything. It stores each event once by its PayPal ID, so a replay does nothing, and it refuses webhook bodies over 1 MB.
+- In `sandbox` and `toolkit` modes, Duebell asks PayPal to check each webhook's signature before changing anything. Mock mode has no signature to check, so it refuses every webhook with `401` and stores nothing, unless `MOCK_WEBHOOKS` is on. Tests and the local demo turn it on; the Render blueprint leaves it off, so nobody can post fake events to a hosted mock demo. See [configuration](../reference/configuration.md#modes).
+- Duebell stores each event once by its PayPal ID, so a replay does nothing, and it refuses webhook bodies over 1 MB.
 - The model's output is untrusted. It may only fill six known fields, and the same validation as the manual form checks them ([ADR 0004](../adr/0004-llm-as-form-filler.md)).
 - Amounts are capped, currencies come from a list, and text fields have length limits. See [configuration](../reference/configuration.md).
 - Every response carries security headers and a content security policy.
@@ -41,5 +42,6 @@ A webhook event belongs to the owner of the invoice it touches.
 1. Set a long random `SECRET_KEY`.
 2. Serve over HTTPS and set `COOKIE_SECURE=true`.
 3. Set your own `DEMO_PASSWORD`. `scripts/seed.py --require-password` refuses to seed without one.
+4. Leave `MOCK_WEBHOOKS` off.
 
-[Deploy to Render](../how-to/deploy-to-render.md) does all three.
+[Deploy to Render](../how-to/deploy-to-render.md) does all four.
