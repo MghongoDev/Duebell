@@ -134,6 +134,8 @@ def seed(session: Session, user_id: int | None = None) -> dict:
             risk_score=assessment.score,
             risk_level=assessment.level,
             risk_reasons="\n".join(assessment.reasons),
+            limited_data=assessment.limited_data,
+            limited_data_reason=assessment.limited_data_reason,
         )
         session.add(invoice)
         total_invoices += 1

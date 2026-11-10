@@ -10,7 +10,7 @@ Every table that holds a user's data has a `user_id` ([ADR 0008](../adr/0008-sig
 | --- | --- | --- |
 | `user` | A person who signs in. | `email` (unique), `password_hash` (scrypt, with its cost). |
 | `client` | Someone a user bills. | `name`, `email`. Email is unique per user, so two users may bill the same address. |
-| `invoice` | A request for payment. | `invoice_number`, `paypal_invoice_id`, `amount_cents`, `currency`, `terms_days`, `issued_at`, `due_at`, `paid_at`, `status`, `risk_score`, `risk_level`, `risk_reasons`, `limited_data`, `repeat_unit`, `repeat_cycles`. The last two hold a Repeat ticked on the form while the invoice waits to be sent, and are cleared when the send starts the schedule. |
+| `invoice` | A request for payment. | `invoice_number`, `paypal_invoice_id`, `amount_cents`, `currency`, `terms_days`, `issued_at`, `due_at`, `paid_at`, `status`, `risk_score`, `risk_level`, `risk_reasons`, `limited_data`, `limited_data_reason`, `repeat_unit`, `repeat_cycles`. The last two hold a Repeat ticked on the form while the invoice waits to be sent, and are cleared when the send starts the schedule. |
 | `reminder` | A drafted or sent **reminder**. | `invoice_id`, `draft_text`, `tone`, `stage`, `status`, `sent_channels`, `sent_at`. At most one `PENDING` reminder per invoice. |
 | `event` | One PayPal webhook delivery. | `paypal_event_id` (primary key), `event_type`, `payload`. |
 | `schedule` | A **schedule**: a repeat or an **instalment plan**. | `kind`, `client_id`, `amount_cents`, `currency`, `terms_days`, `interval_unit`, `interval_count`, `cycles_left`, `starts_on`, `status`. |
@@ -48,6 +48,8 @@ Each set of values below has its own type in the code. The database stores the p
 | `OVERDUE` | Duebell never sets it, but a refresh stores it if PayPal reports it. The scan and the outstanding total treat it like `SENT`. |
 
 A status only moves forward. A webhook or refresh never moves an invoice out of `PAID`, `MARKED_AS_PAID`, `CANCELLED` or `REFUNDED`, except from paid to `REFUNDED`, and never moves it back to `DRAFT`. A refresh ignores any status not in this table, such as `UNKNOWN`. The dashboard's overdue flag is computed: an invoice is overdue when it is past its due date and not paid, cancelled or refunded.
+
+`risk_reasons` holds one reason per line. `limited_data_reason` is the reason that says why a score has limited data, set when the invoice is scored. It is empty when the score has enough data, and the dashboard shows it under the "Limited data" label. Startup adds the column to an older database and leaves it empty on old rows, so they show "Limited data" alone.
 
 ### Reminder
 

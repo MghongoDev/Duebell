@@ -19,7 +19,7 @@ from app.currency import format_amount
 from app.models import Client, Event, Invoice, InvoiceStatus, Reminder, ReminderStatus, as_utc, utcnow
 from app.ownership import Scope, get_owned, owned
 from app.paypal import WEBHOOKS_OFF, PayPalError, PayPalGateway, PayPalTimeout
-from app.risk import HistoryInvoice, RiskAssessment, limited_data_reason, score_invoice
+from app.risk import HistoryInvoice, RiskAssessment, score_invoice
 from app.validation import InvoiceProposal, proposal_to_cents
 
 PAID_STATUSES = {InvoiceStatus.PAID, InvoiceStatus.MARKED_AS_PAID}
@@ -165,6 +165,7 @@ def create_invoice(
         risk_level=assessment.level,
         risk_reasons="\n".join(assessment.reasons),
         limited_data=assessment.limited_data,
+        limited_data_reason=assessment.limited_data_reason,
     )
     _insert_numbered(session, invoice)
     session.refresh(invoice)
@@ -273,7 +274,7 @@ def invoice_rows(session: Session, scope: Scope) -> list[dict]:
                 "risk_level": invoice.risk_level,
                 "risk_reasons": reasons,
                 "limited_data": bool(invoice.limited_data),
-                "limited_data_reason": limited_data_reason(reasons) if invoice.limited_data else None,
+                "limited_data_reason": invoice.limited_data_reason if invoice.limited_data else None,
                 "paypal_invoice_id": invoice.paypal_invoice_id,
             }
         )

@@ -151,6 +151,9 @@ class Invoice(SQLModel, table=True):
     risk_level: Optional[str] = None
     risk_reasons: str = ""
     limited_data: bool = False
+    # Why the score has limited data, set when the invoice is scored (issue #61).
+    # An invoice from an older build has none and shows "Limited data" alone.
+    limited_data_reason: Optional[str] = None
     # A Repeat ticked on the form when the send failed. The first send through
     # POST /api/invoices/{id}/send turns it into a schedule and clears it
     # (issue #41). repeat_cycles None with a repeat_unit repeats until cancelled.
