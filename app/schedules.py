@@ -1,4 +1,4 @@
-"""Recurring invoices and instalment plans (issues #24, #25, #39, #40, #43; ADRs 0003, 0007, 0008).
+"""Recurring invoices and instalment plans (issues #24, #25, #39, #40, #43, #78; ADRs 0003, 0007, 0008).
 
 A schedule is the rule: repeat an invoice every interval, or split one amount
 into instalments. Each future invoice is a ScheduledInvoice. The scan moves due
@@ -32,7 +32,14 @@ from app.models import (
 )
 from app.ownership import Scope, owned
 from app.paypal import PayPalGateway
-from app.services import InvoiceNotSent, create_invoice, money, send_unsent_invoice
+from app.services import (
+    SENT_STATUSES,
+    InvoiceNotSent,
+    create_invoice,
+    money,
+    on_held_repeat_sent,
+    send_unsent_invoice,
+)
 from app.validation import FieldError, InvoiceProposal
 
 INTERVAL_UNITS = tuple(IntervalUnit)
@@ -212,6 +219,34 @@ def hold_repeat(session: Session, invoice: Invoice, unit: str, cycles: int | Non
     session.commit()
 
 
+def start_held_repeat(session: Session, invoice: Invoice) -> Schedule | None:
+    """Start the repeat held on an invoice PayPal has sent (issues #41, #78).
+
+    Whatever moved the invoice out of DRAFT calls this: the Send button, a
+    webhook or a Refresh. The hold is cleared with one conditional update in
+    the same commit that creates the schedule, so when two of them race only
+    one starts a schedule. Returns None if there was nothing to start.
+    """
+    unit, cycles = invoice.repeat_unit, invoice.repeat_cycles
+    if not unit or invoice.status not in SENT_STATUSES:
+        return None
+    claimed = session.exec(
+        update(Invoice)
+        .where(Invoice.id == invoice.id, Invoice.repeat_unit.is_not(None))
+        .values(repeat_unit=None, repeat_cycles=None)
+    )
+    if claimed.rowcount != 1:
+        session.rollback()
+        session.refresh(invoice)
+        return None
+    schedule = repeat_invoice(session, invoice, unit, cycles)
+    session.refresh(invoice)
+    return schedule
+
+
+on_held_repeat_sent(start_held_repeat)
+
+
 def send_draft(
     session: Session, invoice: Invoice, gateway: PayPalGateway, *, warnings: list[str] | None = None
 ) -> Invoice:
@@ -219,20 +254,10 @@ def send_draft(
 
     The send reuses the PayPal invoice, so it never creates a second one.
     Raises ValueError if the invoice is not such a draft, InvoiceNotSent if
-    PayPal refuses. The held repeat is cleared in the same commit that creates
-    the schedule, so two sends at once start one schedule.
+    PayPal refuses.
     """
     invoice = send_unsent_invoice(session, invoice, gateway, warnings=warnings)
-    unit, cycles = invoice.repeat_unit, invoice.repeat_cycles
-    if unit:
-        claimed = session.exec(
-            update(Invoice)
-            .where(Invoice.id == invoice.id, Invoice.repeat_unit.is_not(None))
-            .values(repeat_unit=None, repeat_cycles=None)
-        )
-        if claimed.rowcount == 1:
-            repeat_invoice(session, invoice, unit, cycles)
-        session.refresh(invoice)
+    start_held_repeat(session, invoice)
     return invoice
 
 

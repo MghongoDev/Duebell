@@ -58,7 +58,7 @@ Toolkit calls carry no request ID, because the toolkit builds its own requests. 
 
 ## Schedules
 
-A repeat sends its first invoice when the user submits the form. A schedule then queues the next one. Each date counts from the first invoice, not from the date before it, so a short month does not pull later months back. When its date comes, the scan moves it to pending. Approving it creates the invoice through the same path as the form, so it gets a risk score, reminders and history like any other.
+A repeat sends its first invoice when the user submits the form. A schedule then queues the next one. If that send fails, the repeat waits on the draft and starts when the draft leaves `DRAFT` for a sent status, whether **Send**, a webhook or **Refresh** moved it. Each of them claims the waiting repeat with one conditional update, so a race starts one schedule. A draft that ends cancelled drops its repeat. Each date counts from the first invoice, not from the date before it, so a short month does not pull later months back. When its date comes, the scan moves it to pending. Approving it creates the invoice through the same path as the form, so it gets a risk score, reminders and history like any other.
 
 An approval claims the item before it calls PayPal, so a double click or a second tab cannot bill the client twice. If PayPal does not confirm a send in time, Duebell counts the invoice as sent and warns you to check PayPal, the same rule it applies to reminders. Sending again could bill the client twice; counting it as sent risks only an invoice you have to send by hand.
 
