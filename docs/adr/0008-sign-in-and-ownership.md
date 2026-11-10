@@ -40,3 +40,7 @@ Until issue #24, Duebell had no login and one implicit user, so it could not be 
 A review found that the query helpers took `user_id=None` by default, and `None` meant every user. A route that forgot the argument would have read everyone's records, which is the risk this record set out to remove. Every function that lists records or fetches one by ID now takes a scope with no default: a user ID, or `EVERY_USER` (`app/ownership.py`), which only the scheduler uses. Passing `None` raises `TypeError`. A refit refuses `EVERY_USER`, so it always trains on one user's invoices.
 
 The same review moved the Render start command from a full reset to `scripts/seed.py --if-empty --require-password`, so a restart keeps data and a hosted demo cannot use the published password.
+
+## Revision, 2026-11-10
+
+The note above says the `--if-empty` start command lets a restart keep data. That holds only on a persistent disk. The blueprint runs on Render's free plan, which has no disk: the SQLite file is lost at each deploy, restart and spin-down after 15 idle minutes, and the next start seeds a fresh demo. A persistent disk needs a paid instance type. `--if-empty` still keeps data on such a disk, and `--require-password` still applies everywhere (issue #87).
