@@ -294,9 +294,14 @@ def draft_scheduled(session: Session, now: datetime | None = None, *, scope: Sco
             session.commit()
         except IntegrityError:
             # The next occurrence already exists. The unique index on
-            # (schedule_id, sequence) refused a second; leave this item for later.
+            # (schedule_id, sequence) refused a second, and the rollback also
+            # undid the claim. Claim the item again and skip only the queueing,
+            # so it still reaches PENDING (issue #40).
             session.rollback()
-            continue
+            if not _claim_upcoming(session, item):
+                session.rollback()
+                continue
+            session.commit()
         session.refresh(item)
         drafted.append(item)
     return drafted
