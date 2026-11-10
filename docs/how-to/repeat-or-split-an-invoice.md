@@ -29,7 +29,7 @@ The server refuses a split for an invoice that is not High risk.
 
 ## Stop a schedule
 
-Click **Cancel** next to it under **Scheduled invoices**. Duebell cancels every upcoming or pending invoice from it and leaves sent invoices alone. A schedule stays listed, and can be cancelled, until its last invoice is approved or skipped.
+Click **Cancel** next to it under **Scheduled invoices**. Duebell cancels every upcoming or pending invoice from it and leaves sent invoices alone. A schedule stays listed, and can be cancelled, until its last invoice is approved or skipped. If you cancel while an approval is waiting on PayPal and PayPal then fails, the invoice stays cancelled and cannot be approved. A draft PayPal holds but did not send stays in your invoice list; click **Send** on its row if you still want it to go.
 
 ## If approval fails
 
