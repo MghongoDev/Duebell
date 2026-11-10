@@ -4,6 +4,8 @@ Duebell reads its settings from environment variables when it starts. It also lo
 
 The defaults run the whole demo with no credentials. A blank value, such as `ANTHROPIC_MODEL=` in `.env.example`, counts as unset, so the default applies.
 
+On/off settings (`MOCK_WEBHOOKS`, `SMTP_STARTTLS`, `COOKIE_SECURE`) accept `on`, `yes`, `true` or `1` for on, and `off`, `no`, `false` or `0` for off. Case and surrounding spaces do not matter. Any other value stops Duebell at start with an error that names the setting.
+
 ## Modes
 
 | Variable | Default | Values | Effect |
@@ -11,9 +13,9 @@ The defaults run the whole demo with no credentials. A blank value, such as `ANT
 | `PAYPAL_MODE` | `mock` | `mock`, `sandbox`, `toolkit` | Picks the [gateway](../../GLOSSARY.md). `mock` keeps invoices in memory. `sandbox` calls the PayPal sandbox REST API. `toolkit` sends, reminds, records payments and reads status through PayPal's Agent Toolkit ([ADR 0006](../adr/0006-agent-toolkit-adapter.md)). |
 | `LLM_MODE` | `mock` | `mock`, `live` | `mock` parses only the demo sentence. `live` calls an Anthropic-compatible model. |
 | `EMAIL_MODE` | `mock` | `mock`, `smtp` | `mock` keeps reminder emails in memory. `smtp` sends them. |
-| `MOCK_WEBHOOKS` | `false` | `true`, `false` | Mock mode cannot check a webhook's signature, so it refuses every webhook with `401` and stores nothing unless this is `true`. `1`, `yes` and `on` also count as true. `.env.example` turns it on for the local demo. Leave it off on a public host; `render.yaml` does. It has no effect in `sandbox` or `toolkit` mode, which always check the signature through PayPal. |
+| `MOCK_WEBHOOKS` | `false` | on/off | Mock mode cannot check a webhook's signature, so it refuses every webhook with `401` and stores nothing unless this is on. `.env.example` turns it on for the local demo. Leave it off on a public host; `render.yaml` does. It has no effect in `sandbox` or `toolkit` mode, which always check the signature through PayPal. |
 
-Any value other than those listed falls back to `mock`.
+A `*_MODE` value other than those listed falls back to `mock`.
 
 ## PayPal
 
@@ -47,7 +49,7 @@ If live mode lacks a credential or a base URL, parsing falls back to the mock pa
 | `SMTP_USERNAME` | empty | Leave empty to skip login. |
 | `SMTP_PASSWORD` | empty | |
 | `SMTP_FROM` | empty | `smtp` mode needs it. |
-| `SMTP_STARTTLS` | `true` | `0`, `false` or `no` turns it off. |
+| `SMTP_STARTTLS` | `true` | On/off. Turn it off only for a server that does not offer STARTTLS. |
 | `SMTP_TIMEOUT_SECONDS` | `20` | |
 
 ## Sign-in
@@ -55,7 +57,7 @@ If live mode lacks a credential or a base URL, parsing falls back to the mock pa
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `SECRET_KEY` | empty | Signs the session cookie. If empty, Duebell makes a random key at start, and every session ends when the process restarts. |
-| `COOKIE_SECURE` | `false` | Set `true` behind HTTPS so browsers send the cookie only over HTTPS. |
+| `COOKIE_SECURE` | `false` | On/off. Turn it on behind HTTPS so browsers send the cookie only over HTTPS. |
 | `DEMO_PASSWORD` | empty | The password the seed gives `demo@duebell.test`. If empty, the seed uses `duebell-demo-2026`, unless it runs with `--require-password`. |
 | `DUEBELL_PASSWORD` | empty | Read only by `scripts/create_user.py`, instead of prompting. |
 
