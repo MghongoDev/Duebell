@@ -179,6 +179,10 @@ class Reminder(SQLModel, table=True):
     # Comma-separated channels that have already delivered this reminder,
     # e.g. "paypal" or "paypal,email". A retry skips them.
     sent_channels: str = ""
+    # When Duebell last asked PayPal to send this reminder, saved before the
+    # call (issue #75). If PayPal is not in sent_channels, PayPal may have sent
+    # it, so a retry skips PayPal. It never counts the reminder as delivered.
+    paypal_attempted_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
     # BEFORE_DUE or OVERDUE, set when drafted (issue #42). A row from an older
     # build has none; the scan infers it from created_at and the due date.
     stage: Optional[str] = None

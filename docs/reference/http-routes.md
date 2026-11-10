@@ -12,7 +12,7 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 | --- | --- | --- |
 | `GET` | `/healthz` | Returns `{"ok": true, "service": "duebell"}`. It does not query the database or PayPal. |
 | `GET` | `/login` | The sign-in page. |
-| `POST` | `/login` | Fields `email`, `password`. Sets the session cookie and redirects to `/`. A wrong password, or a locked email, returns `401` with the page. An `Origin` header naming another host returns `403`. |
+| `POST` | `/login` | Fields `email`, `password`. Sets the session cookie and redirects to `/`. A wrong password, a locked email, an email over 254 characters or without `@`, or a password over 1,024 characters returns `401` with the page. An `Origin` header naming another host returns `403`. |
 | `POST` | `/logout` | Clears the cookie and redirects to `/login`. |
 | `GET` | `/` | The dashboard. |
 
@@ -49,7 +49,7 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 
 | Method | Path | Does |
 | --- | --- | --- |
-| `POST` | `/api/scheduled/{item_id}/approve` | Creates and sends a pending scheduled invoice. If an earlier try created the PayPal draft but failed to send it, sends that draft instead of creating another; if PayPal has since sent it, marks the item sent. Returns `status`, `invoice_id`, and a `warning` if PayPal did not confirm the send in time. `409` if the item is not pending or another approval holds it. `502` if PayPal fails; the item stays pending. |
+| `POST` | `/api/scheduled/{item_id}/approve` | Creates and sends a pending scheduled invoice. The item is linked to its invoice before PayPal is called, so a retry never creates a second one: if an earlier try saved the invoice but stopped before PayPal created it, creates that one in PayPal; if PayPal holds it unsent, sends it; if PayPal has since sent it, marks the item sent. Returns `status`, `invoice_id`, and a `warning` if PayPal did not confirm the send in time. `409` if the item is not pending or another approval holds it. `502` if PayPal fails; the item stays pending. |
 | `POST` | `/api/scheduled/{item_id}/reject` | Skips this invoice. A repeat carries on. |
 | `POST` | `/api/schedules/{schedule_id}/cancel` | Stops the schedule and cancels its upcoming and pending invoices. Sent invoices stay as they are. |
 

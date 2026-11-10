@@ -1,4 +1,4 @@
-"""Background jobs for Duebell (issues #15, #22, #24, #25; ADRs 0002, 0003, 0007, 0008).
+"""Background jobs for Duebell (issues #15, #22, #24, #25, #81; ADRs 0002, 0003, 0007, 0008).
 
 The reminder scan only drafts. Sending still needs a human approval
 (ADR 0003). The risk refit only stores a comparison; the rule baseline stays
@@ -21,17 +21,24 @@ from app.schedules import draft_scheduled
 log = logging.getLogger("duebell.jobs")
 
 
+def _run_step(app, name: str, step) -> None:
+    """Run one scan step in a fresh session and log its own failure."""
+    try:
+        with Session(app.state.engine) as session:
+            step(session)
+    except Exception:  # the scheduler must survive a bad step
+        log.exception("%s failed", name)
+
+
 def start_scheduler(app) -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="UTC")
 
     def tick() -> None:
-        try:
-            with Session(app.state.engine) as session:
-                # The scheduler is the one caller allowed to scan every user.
-                draft_reminders(session, app.state.settings, scope=EVERY_USER)
-                draft_scheduled(session, scope=EVERY_USER)
-        except Exception:  # the scheduler must survive a bad tick
-            log.exception("reminder scan failed")
+        # The scheduler is the one caller allowed to scan every user. Each step
+        # has its own session and error handler, so a failed step cannot skip
+        # or poison the other (issue #81).
+        _run_step(app, "reminder drafting", lambda session: draft_reminders(session, app.state.settings, scope=EVERY_USER))
+        _run_step(app, "scheduled invoice drafting", lambda session: draft_scheduled(session, scope=EVERY_USER))
 
     scheduler.add_job(
         tick,

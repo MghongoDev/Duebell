@@ -33,15 +33,16 @@ Duebell records each channel the moment it succeeds. If email then fails, the re
 
 ## Never sending twice
 
-Three failures could each lead to a duplicate. Duebell handles each one differently.
+Four failures could each lead to a duplicate. Duebell handles each one differently.
 
 | Failure | What could go wrong | What Duebell does |
 | --- | --- | --- |
 | PayPal creates an invoice, then the send fails | A retry creates a second invoice. | The invoice stays a draft with its PayPal ID. Approving again, or clicking **Send** on the draft's row, sends that draft. |
 | Email fails after PayPal sent the reminder | A retry reminds through PayPal again. | `sent_channels` records PayPal, and the retry skips it. |
 | A toolkit call times out | The call keeps running and may still send. A retry sends again. | It counts the PayPal reminder as sent and warns the user to check PayPal. |
+| PayPal sends the reminder, then Duebell fails to save that | A retry reminds through PayPal again. | Duebell saves `paypal_attempted_at` before it calls PayPal. The retry finds it, counts the PayPal reminder as sent, and warns the user to check PayPal. If PayPal refused the call, Duebell clears it, so the retry sends through PayPal. |
 
-The third case trades one possible missed reminder for no duplicate. A duplicate reaches the client. A missed one shows up when the user checks PayPal, and they can remind from there. Duebell will not draft another reminder for that invoice in the same stage, because it counts this one as sent.
+The last two cases trade one possible missed reminder for no duplicate. A duplicate reaches the client. A missed one shows up when the user checks PayPal, and they can remind from there. Duebell will not draft another reminder for that invoice in the same stage, because it counts this one as sent.
 
 ### Retries inside one call
 
@@ -58,7 +59,7 @@ Toolkit calls carry no request ID, because the toolkit builds its own requests. 
 
 ## Schedules
 
-A repeat sends its first invoice when the user submits the form. A schedule then queues the next one. If that send fails, the repeat waits on the draft and starts when the draft leaves `DRAFT` for a sent status, whether **Send**, a webhook or **Refresh** moved it. Each of them claims the waiting repeat with one conditional update, so a race starts one schedule. A draft that ends cancelled drops its repeat. Each date counts from the first invoice, not from the date before it, so a short month does not pull later months back. When its date comes, the scan moves it to pending. Approving it creates the invoice through the same path as the form, so it gets a risk score, reminders and history like any other.
+A repeat sends its first invoice when the user submits the form. A schedule then queues the next one. If that send fails, the repeat waits on the draft and starts when the draft leaves `DRAFT` for a sent status, whether **Send**, a webhook or **Refresh** moved it. Each of them claims the waiting repeat with one conditional update, so a race starts one schedule. A draft that ends cancelled drops its repeat. Each date counts from the first invoice, not from the date before it, so a short month does not pull later months back. When its date comes, the scan moves it to pending. Approving it creates the invoice through the same path as the form, so it gets a risk score, reminders and history like any other. Approval saves the invoice and links it to the scheduled one before it calls PayPal. If a commit fails or the app restarts partway, the next approval finishes that invoice, so PayPal bills the client once.
 
 An approval claims the item before it calls PayPal, so a double click or a second tab cannot bill the client twice. If PayPal does not confirm a send in time, Duebell counts the invoice as sent and warns you to check PayPal, the same rule it applies to reminders. Sending again could bill the client twice; counting it as sent risks only an invoice you have to send by hand.
 

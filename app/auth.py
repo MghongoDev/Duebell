@@ -24,6 +24,9 @@ from app.models import User
 COOKIE_NAME = "duebell_session"
 SESSION_SECONDS = 12 * 60 * 60
 MIN_PASSWORD_CHARS = 10
+# Sign-in refuses longer input before the lockout or scrypt sees it (issue #82).
+MAX_EMAIL_CHARS = 254
+MAX_PASSWORD_CHARS = 1024
 SCRYPT = {"n": 2**14, "r": 8, "p": 1, "dklen": 32}
 MAX_FAILURES = 5
 LOCKOUT_SECONDS = 15 * 60
@@ -62,12 +65,19 @@ def check_password(password: str, stored: str) -> bool:
     return scheme == "scrypt" and hmac.compare_digest(digest, expected)
 
 
+def valid_email(email: str) -> bool:
+    """True if `email`, already stripped and lowercased, is one create_user accepts."""
+    return "@" in email and len(email) <= MAX_EMAIL_CHARS
+
+
 def create_user(session: Session, email: str, password: str) -> User:
     email = email.strip().lower()
-    if "@" not in email or len(email) > 254:
+    if not valid_email(email):
         raise AuthError("Enter a valid email address.")
     if len(password) < MIN_PASSWORD_CHARS:
         raise AuthError(f"Use a password of at least {MIN_PASSWORD_CHARS} characters.")
+    if len(password) > MAX_PASSWORD_CHARS:
+        raise AuthError(f"Use a password of at most {MAX_PASSWORD_CHARS} characters.")
     if session.exec(select(User).where(User.email == email)).first():
         raise AuthError("A user with that email already exists.")
     user = User(email=email, password_hash=hash_password(password))
@@ -139,13 +149,25 @@ class Lockout:
 
 
 def authenticate(session: Session, email: str, password: str, lockout: Lockout) -> User:
+    """Sign a user in, or raise AuthError.
+
+    An email no user can have is refused before the lockout counts it, so
+    junk cannot fill the table, and a password too long for any user is
+    refused before scrypt hashes it (issue #82). Both get the same message as
+    a wrong password.
+    """
+    mismatch = AuthError("That email and password do not match.")
     email = email.strip().lower()
+    if not valid_email(email):
+        raise mismatch
     if not lockout.attempt(email):
         raise AuthError("Too many failed attempts. Wait 15 minutes and try again.")
+    if len(password) > MAX_PASSWORD_CHARS:
+        raise mismatch
     user = session.exec(select(User).where(User.email == email)).first()
     valid = check_password(password, user.password_hash if user else _DUMMY_HASH)
     if not user or not valid:
-        raise AuthError("That email and password do not match.")
+        raise mismatch
     lockout.clear(email)
     return user
 
