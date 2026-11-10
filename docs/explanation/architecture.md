@@ -32,6 +32,8 @@ Duebell is one FastAPI process over one SQLite file ([ADR 0005](../adr/0005-sqli
 2. The route runs as that user. Every read passes the user's ID as its scope, and a lookup by ID returns nothing for another user's record.
 3. Writes go through `services`, `reminders` or `schedules`. Nothing that reaches PayPal or a client runs without an approval route.
 
+Every route is a plain `def`, so FastAPI runs it in its threadpool, and the middleware's user lookup runs there too. A slow model or PayPal call holds up only its own request, never the health check or another user. The webhook reads its body in an async dependency, then runs like any other route. Because routes run in parallel, anything that sends claims its row first with one conditional update, and only one request wins.
+
 ## Creating an invoice
 
 1. The user fills the form, or `POST /parse` turns free text into the same six fields.

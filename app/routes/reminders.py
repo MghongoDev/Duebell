@@ -1,8 +1,8 @@
-"""Scanning, editing, approving and rejecting reminders (issues #15, #26; ADR 0003)."""
+"""Scanning, editing, approving and rejecting reminders (issues #15, #26, #48; ADR 0003)."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import JSONResponse
 from sqlmodel import Session
 
@@ -38,17 +38,21 @@ def api_reminders(request: Request, session: Session = Depends(get_session)):
 
 
 @router.post("/api/reminders/{reminder_id}/approve", response_class=JSONResponse)
-async def api_approve_reminder(
+def api_approve_reminder(
     reminder_id: int,
     request: Request,
+    channels: list[str] = Form([]),
+    channel: str = Form(""),
     session: Session = Depends(get_session),
 ):
+    # A plain def runs in FastAPI's threadpool, so PayPal and the mailer do not
+    # hold up other requests. send_reminder claims the draft first, so two
+    # approvals at once send one reminder (issue #48).
     reminder = get_owned(session, Reminder, reminder_id, current_user_id(request))
     if reminder is None:
         return JSONResponse({"ok": False, "error": "Reminder not found."}, status_code=404)
-    form = await request.form()
     try:
-        channels = parse_channels(form.getlist("channels") or form.get("channel"))
+        channels = parse_channels(channels or channel)
     except ValueError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
     try:
@@ -74,9 +78,10 @@ async def api_approve_reminder(
 
 
 @router.post("/api/reminders/{reminder_id}/edit", response_class=JSONResponse)
-async def api_edit_reminder(
+def api_edit_reminder(
     reminder_id: int,
     request: Request,
+    draft_text: str = Form(""),
     session: Session = Depends(get_session),
 ):
     reminder = get_owned(session, Reminder, reminder_id, current_user_id(request))
@@ -87,9 +92,8 @@ async def api_edit_reminder(
             {"ok": False, "error": "Only a pending draft can be edited."},
             status_code=409,
         )
-    form = await request.form()
     try:
-        edit_reminder(session, reminder, str(form.get("draft_text", "")))
+        edit_reminder(session, reminder, draft_text)
     except ValueError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
     return {"ok": True, "draft_text": reminder.draft_text}

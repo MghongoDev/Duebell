@@ -415,7 +415,8 @@ button.small {
   color: var(--ink);
 }
 
-.reminder-status-pending {
+.reminder-status-pending,
+.reminder-status-sending {
   background: #fdf1d6;
   color: #8a5a12;
 }

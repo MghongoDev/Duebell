@@ -63,6 +63,8 @@ class InvoiceStatus(StrEnum):
 
 class ReminderStatus(StrEnum):
     PENDING = "PENDING"
+    # Claimed by one approval while it sends (issue #48).
+    SENDING = "SENDING"
     SENT = "SENT"
     REJECTED = "REJECTED"
 
