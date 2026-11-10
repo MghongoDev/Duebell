@@ -1,0 +1,4 @@
+# Test and lint tools. Constrained to the runtime lock so both agree.
+-c requirements.txt
+pytest>=8.3
+ruff==0.16.10

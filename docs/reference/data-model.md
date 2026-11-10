@@ -17,7 +17,7 @@ Every table that holds a user's data has a `user_id` ([ADR 0008](../adr/0008-sig
 | `scheduledinvoice` | A **scheduled invoice**. | `schedule_id`, `sequence`, `amount_cents`, `issue_on`, `status`, `invoice_id`. |
 | `riskcomparison` | One refit of the **risk comparison**. | `status`, `rows_used`, `late_count`, `test_rows`, `baseline_accuracy`, `baseline_auc`, `logistic_accuracy`, `logistic_auc`, `message`. |
 
-Amounts are whole cents. Times are stored in UTC.
+Amounts are whole cents. Times are stored in UTC, and every time column reads back as an aware UTC datetime, whichever sqlmodel version is installed.
 
 ## Statuses
 
