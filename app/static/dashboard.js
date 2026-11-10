@@ -33,8 +33,12 @@ const riskCell = (params) => {
   return `<span class="risk risk-${params.value.toLowerCase()}">${escapeHtml(params.value)}</span><ul class="reasons">${reasons}${ld}</ul>`;
 };
 const actionsCell = (params) => {
+  // PayPal holds this draft but the send failed. Send it again, never create
+  // a second PayPal invoice (issue #41).
+  const unsent = params.data.status === "DRAFT" && params.data.paypal_invoice_id;
+  const send = unsent ? `<button class="small" data-action="send" data-id="${params.data.id}">Send</button> ` : "";
   const pay = params.data.closed ? "" : ` <button class="ghost small" data-action="pay" data-id="${params.data.id}">Simulate payment</button>`;
-  return `<button class="ghost small" data-action="refresh" data-id="${params.data.id}">Refresh</button>${pay}`;
+  return `${send}<button class="ghost small" data-action="refresh" data-id="${params.data.id}">Refresh</button>${pay}`;
 };
 
 const gridState = { status: "", risk: "" };
@@ -120,8 +124,10 @@ async function runAction(button, label, path, options = {}) {
 document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-action]");
   if (!button) return;
-  const path = button.dataset.action === "pay" ? "simulate-payment" : "refresh";
-  runAction(button, "Working...", `/api/invoices/${button.dataset.id}/${path}`);
+  const paths = { pay: "simulate-payment", send: "send", refresh: "refresh" };
+  const path = paths[button.dataset.action] || "refresh";
+  const label = button.dataset.action === "send" ? "Sending..." : "Working...";
+  runAction(button, label, `/api/invoices/${button.dataset.id}/${path}`);
 });
 
 const scanButton = document.getElementById("scan-reminders");

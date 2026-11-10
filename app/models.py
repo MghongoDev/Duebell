@@ -1,4 +1,4 @@
-"""Database models and engine setup for Duebell (issues #9, #22, #24, #25, #26, #31, #40, #42).
+"""Database models and engine setup for Duebell (issues #9, #22, #24, #25, #26, #31, #40, #41, #42).
 
 Every table that holds a user's data has a user_id (ADR 0008). init_db adds
 columns and indexes a newer model declares to an older database, so a demo
@@ -154,6 +154,11 @@ class Invoice(SQLModel, table=True):
     # Why the score has limited data, set when the invoice is scored (issue #61).
     # An invoice from an older build has none and shows "Limited data" alone.
     limited_data_reason: Optional[str] = None
+    # A Repeat ticked on the form when the send failed. The first send through
+    # POST /api/invoices/{id}/send turns it into a schedule and clears it
+    # (issue #41). repeat_cycles None with a repeat_unit repeats until cancelled.
+    repeat_unit: Optional[str] = None
+    repeat_cycles: Optional[int] = None
     created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
 
 
