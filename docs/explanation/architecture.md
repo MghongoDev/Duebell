@@ -23,7 +23,7 @@ Duebell is one FastAPI process over one SQLite file ([ADR 0005](../adr/0005-sqli
 | `app/llm.py` | The model call, JSON checks and the demo parser. |
 | `app/retry.py` | Bounded retries with backoff for outbound calls. |
 | `app/jobs.py` | The background scheduler. |
-| `app/templates/`, `app/static/` | Pages, the AG Grid setup, styles. |
+| `app/templates/`, `app/static/` | Pages, the dashboard script, styles, and the vendored AG Grid and htmx files. |
 | `scripts/` | Seeding, users, checks and webhook registration. See [commands](../reference/commands.md). |
 
 ## A request

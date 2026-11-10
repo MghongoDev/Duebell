@@ -122,10 +122,13 @@ def create_app(
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
+        # Scripts come only from /static, where the vendored AG Grid and htmx
+        # live (issue #49). AG Grid and htmx inject <style> tags and style
+        # attributes at run time, so styles still allow 'unsafe-inline'.
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; "
-            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; "
             "frame-ancestors 'none'"
         )
