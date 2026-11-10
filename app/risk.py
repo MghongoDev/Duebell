@@ -1,4 +1,4 @@
-"""Late-payment risk baseline for Duebell (issues #12, #23, #46).
+"""Late-payment risk baseline for Duebell (issues #12, #23, #46, #61).
 
 The shipped scorer is a rule baseline. It returns a score, a level, and
 reasons a human can check. A separate training script compares a logistic
@@ -17,13 +17,12 @@ LIMITED_DATA_BELOW = 2
 LOW_BELOW = 0.30
 HIGH_FROM = 0.55
 
-# Every limited-data reason starts with one of these, so the dashboard can
-# find it among the stored reasons (issue #46).
+# Opening words of each limited-data reason (issue #46). The dashboard reads
+# the reason from its own field, never by matching these words (issue #61).
 NEW_CLIENT = "New client."
 NO_OUTCOME_YET = "No paid or overdue invoices yet."
 FIRST_IN_CURRENCY = "First"
 LIMITED_HISTORY = "Limited history."
-LIMITED_DATA_STARTS = (NEW_CLIENT, NO_OUTCOME_YET, FIRST_IN_CURRENCY, LIMITED_HISTORY)
 
 
 @dataclass(frozen=True)
@@ -40,6 +39,8 @@ class RiskAssessment:
     level: str
     reasons: list[str]
     limited_data: bool
+    # The reason that says why the score has limited data, if one was given (issue #61).
+    limited_data_reason: str | None = None
 
 
 def _now(now: datetime | None) -> datetime:
@@ -124,15 +125,17 @@ def score_invoice(
 ) -> RiskAssessment:
     features = extract_features(amount_cents, terms_days, history, usual_amount_cents, now, currency)
     reasons: list[str] = []
+    limited_reason: str | None = None
 
     if features["new_client"]:
         score = 0.40
         waiting = features["open_count"]
         if waiting:
             are = "invoice is" if waiting == 1 else "invoices are"
-            reasons.append(f"{NO_OUTCOME_YET} {waiting} open {are} not yet due, so this score is a rough guide.")
+            limited_reason = f"{NO_OUTCOME_YET} {waiting} open {are} not yet due, so this score is a rough guide."
         else:
-            reasons.append(f"{NEW_CLIENT} No payment history yet, so this score is a rough guide.")
+            limited_reason = f"{NEW_CLIENT} No payment history yet, so this score is a rough guide."
+        reasons.append(limited_reason)
     else:
         score = 0.18
         score += 0.45 * features["late_share"]
@@ -153,9 +156,10 @@ def score_invoice(
             )
 
     if features["new_currency"] and usual_amount_cents is None:
-        reasons.append(
+        limited_reason = (
             f"{FIRST_IN_CURRENCY} {currency} invoice for this client, so there is no usual amount to compare."
         )
+        reasons.append(limited_reason)
     elif features["amount_ratio"] >= 1.5:
         score += 0.08
         reasons.append(
@@ -167,7 +171,8 @@ def score_invoice(
         reasons.append(f"Net {terms_days} terms are longer than 30 days.")
 
     if features["limited_data"] and not features["new_client"] and not features["new_currency"]:
-        reasons.append(f"{LIMITED_HISTORY} Two or more paid or overdue invoices would sharpen this score.")
+        limited_reason = f"{LIMITED_HISTORY} Two or more paid or overdue invoices would sharpen this score."
+        reasons.append(limited_reason)
 
     score = round(max(0.0, min(1.0, score)), 2)
     return RiskAssessment(
@@ -175,9 +180,6 @@ def score_invoice(
         level=level_for(score),
         reasons=reasons,
         limited_data=features["limited_data"],
+        limited_data_reason=limited_reason,
     )
 
-
-def limited_data_reason(reasons: list[str]) -> str | None:
-    """The reason behind a limited-data score, found among stored reasons (issue #46)."""
-    return next((reason for reason in reasons if reason.startswith(LIMITED_DATA_STARTS)), None)

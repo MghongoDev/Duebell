@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 
 from sqlmodel import Session, select
 
-from app import risk
 from app.learning import outcome, training_rows
 from app.models import Client, Invoice, User, init_db, make_engine, utcnow
 from app.ownership import EVERY_USER
@@ -41,7 +40,7 @@ def test_only_open_invoices_is_limited_data_and_says_why():
     assert result.reasons[0] == (
         "No paid or overdue invoices yet. 2 open invoices are not yet due, so this score is a rough guide."
     )
-    assert risk.limited_data_reason(result.reasons) == result.reasons[0]
+    assert result.limited_data_reason == result.reasons[0]
 
 
 def test_an_invoice_less_than_a_day_overdue_is_not_yet_known():
@@ -54,7 +53,7 @@ def test_an_invoice_less_than_a_day_overdue_is_not_yet_known():
 def test_limited_history_reason_counts_only_known_outcomes():
     result = score_invoice(100_000, 14, [paid(0), open_not_due()], now=NOW)
     assert result.limited_data is True
-    assert risk.limited_data_reason(result.reasons) == (
+    assert result.limited_data_reason == (
         "Limited history. Two or more paid or overdue invoices would sharpen this score."
     )
 

@@ -149,6 +149,9 @@ class Invoice(SQLModel, table=True):
     risk_level: Optional[str] = None
     risk_reasons: str = ""
     limited_data: bool = False
+    # Why the score has limited data, set when the invoice is scored (issue #61).
+    # An invoice from an older build has none and shows "Limited data" alone.
+    limited_data_reason: Optional[str] = None
     created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
 
 

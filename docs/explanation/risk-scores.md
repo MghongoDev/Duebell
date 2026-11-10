@@ -31,7 +31,7 @@ The weights are set by hand. Real payment data has not tested them.
 
 A client with fewer than two earlier invoices with a known outcome gets a **limited-data score**. A client with only drafts and open invoices is one of these. So is a client's first invoice in a new currency, because there is no usual amount in that currency to compare with.
 
-One of the reasons always says why the data is limited. The dashboard shows that reason under the "Limited data" label.
+One of the reasons always says why the data is limited. Duebell stores that reason in its own field when it scores the invoice, and the dashboard shows it under the "Limited data" label. An invoice scored by an older build has no stored reason and shows the label alone.
 
 ## Currencies
 
