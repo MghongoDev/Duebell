@@ -1,4 +1,4 @@
-"""Late-payment risk baseline for Duebell (issues #12, #23).
+"""Late-payment risk baseline for Duebell (issues #12, #23, #46).
 
 The shipped scorer is a rule baseline. It returns a score, a level, and
 reasons a human can check. A separate training script compares a logistic
@@ -16,6 +16,14 @@ from statistics import mean
 LIMITED_DATA_BELOW = 2
 LOW_BELOW = 0.30
 HIGH_FROM = 0.55
+
+# Every limited-data reason starts with one of these, so the dashboard can
+# find it among the stored reasons (issue #46).
+NEW_CLIENT = "New client."
+NO_OUTCOME_YET = "No paid or overdue invoices yet."
+FIRST_IN_CURRENCY = "First"
+LIMITED_HISTORY = "Limited history."
+LIMITED_DATA_STARTS = (NEW_CLIENT, NO_OUTCOME_YET, FIRST_IN_CURRENCY, LIMITED_HISTORY)
 
 
 @dataclass(frozen=True)
@@ -43,6 +51,19 @@ def days_late(invoice: HistoryInvoice, now: datetime | None = None) -> int:
     return max(0, (end - invoice.due_at).days)
 
 
+def outcome_known(invoice: HistoryInvoice, now: datetime | None = None) -> bool:
+    """True once an invoice's outcome is known at `now` (issue #46).
+
+    Known means paid by `now`, or unpaid and at least one full day past its
+    due date. An open invoice that is not yet due says nothing about how the
+    client pays, so it never counts as paid on time.
+    """
+    moment = _now(now)
+    if invoice.paid_at is not None and invoice.paid_at <= moment:
+        return True
+    return max(0, (moment - invoice.due_at).days) > 0
+
+
 def extract_features(
     amount_cents: int,
     terms_days: int,
@@ -51,18 +72,22 @@ def extract_features(
     now: datetime | None = None,
     currency: str | None = None,
 ) -> dict:
-    prior_count = len(history)
-    lateness = [days_late(item, now) for item in history]
+    # Only invoices whose outcome is known count. Open ones wait (issue #46).
+    known = [item for item in history if outcome_known(item, now)]
+    open_count = len(history) - len(known)
+    prior_count = len(known)
+    lateness = [days_late(item, now) for item in known]
     late_count = sum(1 for days in lateness if days > 0)
     late_share = late_count / prior_count if prior_count else 0.0
     average_days_late = mean(lateness) if lateness else 0.0
     # Lateness is behaviour and uses every currency. Amounts only compare
     # within one currency, so a client's EUR history never skews a USD ratio.
-    priced = [item for item in history if currency is None or item.currency == currency]
+    priced = [item for item in known if currency is None or item.currency == currency]
     usual = usual_amount_cents or (int(mean(item.amount_cents for item in priced)) if priced else amount_cents)
     amount_ratio = amount_cents / usual if usual else 1.0
     return {
         "prior_count": prior_count,
+        "open_count": open_count,
         "late_count": late_count,
         "late_share": late_share,
         "average_days_late": average_days_late,
@@ -102,7 +127,12 @@ def score_invoice(
 
     if features["new_client"]:
         score = 0.40
-        reasons.append("New client. No payment history yet, so this score is a rough guide.")
+        waiting = features["open_count"]
+        if waiting:
+            are = "invoice is" if waiting == 1 else "invoices are"
+            reasons.append(f"{NO_OUTCOME_YET} {waiting} open {are} not yet due, so this score is a rough guide.")
+        else:
+            reasons.append(f"{NEW_CLIENT} No payment history yet, so this score is a rough guide.")
     else:
         score = 0.18
         score += 0.45 * features["late_share"]
@@ -124,7 +154,7 @@ def score_invoice(
 
     if features["new_currency"] and usual_amount_cents is None:
         reasons.append(
-            f"First {currency} invoice for this client, so there is no usual amount to compare."
+            f"{FIRST_IN_CURRENCY} {currency} invoice for this client, so there is no usual amount to compare."
         )
     elif features["amount_ratio"] >= 1.5:
         score += 0.08
@@ -137,7 +167,7 @@ def score_invoice(
         reasons.append(f"Net {terms_days} terms are longer than 30 days.")
 
     if features["limited_data"] and not features["new_client"] and not features["new_currency"]:
-        reasons.append("Limited history. Two or more paid invoices would sharpen this score.")
+        reasons.append(f"{LIMITED_HISTORY} Two or more paid or overdue invoices would sharpen this score.")
 
     score = round(max(0.0, min(1.0, score)), 2)
     return RiskAssessment(
@@ -146,3 +176,8 @@ def score_invoice(
         reasons=reasons,
         limited_data=features["limited_data"],
     )
+
+
+def limited_data_reason(reasons: list[str]) -> str | None:
+    """The reason behind a limited-data score, found among stored reasons (issue #46)."""
+    return next((reason for reason in reasons if reason.startswith(LIMITED_DATA_STARTS)), None)

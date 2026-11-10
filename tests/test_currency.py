@@ -72,7 +72,18 @@ def test_eur_invoice_reaches_paypal_in_eur(client):
 
 
 def test_mixed_client_gets_per_currency_totals_and_risk(client):
+    from sqlmodel import Session, select
+
+    from app.models import Invoice
+
     client.post("/invoices", data=FORM, follow_redirects=False)
+    # Risk counts only invoices with a known outcome (issue #46), so pay the USD one first.
+    with Session(client.app.state.engine) as session:
+        usd = session.exec(select(Invoice)).one()
+        usd.status = "PAID"
+        usd.paid_at = utcnow()
+        session.add(usd)
+        session.commit()
     client.post("/invoices", data=dict(FORM, amount="5000.00", currency="EUR"), follow_redirects=False)
     rows = client.get("/api/invoices").json()
     eur = next(row for row in rows if row["currency"] == "EUR")

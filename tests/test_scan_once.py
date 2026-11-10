@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.config import Settings
-from app.models import Reminder, ScheduledInvoice, init_db, make_engine
+from app.models import Reminder, Schedule, ScheduledInvoice, init_db, make_engine
 from app.ownership import EVERY_USER
 from app.reminders import draft_reminders
 from app.schedules import draft_scheduled
@@ -195,3 +195,27 @@ def test_an_old_database_with_duplicates_still_starts(tmp_path, caplog):
         connection.execute(text("UPDATE reminder SET status = 'REJECTED' WHERE draft_text = 'b'"))
     init_db(engine)
     assert "ux_reminder_pending_invoice" in _unique_indexes(engine, "reminder")
+
+
+def test_a_due_item_still_becomes_pending_when_its_next_occurrence_exists(client):
+    """The index refuses a second next occurrence; the item keeps its claim anyway."""
+    client.post("/invoices", data=dict(FORM, repeat="MONTH", repeat_cycles="3"), follow_redirects=False)
+    [upcoming] = items(client)
+    with Session(client.app.state.engine) as session:
+        session.add(
+            ScheduledInvoice(
+                user_id=upcoming.user_id,
+                schedule_id=upcoming.schedule_id,
+                sequence=upcoming.sequence + 1,
+                amount_cents=upcoming.amount_cents,
+                issue_on=upcoming.issue_on,
+            )
+        )
+        session.commit()
+        cycles_left = session.get(Schedule, upcoming.schedule_id).cycles_left
+    move_due(client, upcoming.id)
+
+    assert client.post("/api/reminders/scan").json()["scheduled"] == 1
+    assert [(item.sequence, item.status) for item in items(client)] == [(1, "PENDING"), (2, "UPCOMING")]
+    with Session(client.app.state.engine) as session:
+        assert session.get(Schedule, upcoming.schedule_id).cycles_left == cycles_left

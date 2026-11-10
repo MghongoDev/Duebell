@@ -20,7 +20,6 @@ from app.routes.common import MAX_PROMPT_CHARS, current_user_id, get_session
 from app.routes.dashboard import render_dashboard
 from app.schedules import (
     ScheduleBasis,
-    add_interval,
     create_plan,
     create_recurring,
     draft_scheduled,
@@ -176,7 +175,7 @@ def create_invoice_form(
             basis,
             interval_unit=schedule_request.repeat,
             cycles=schedule_request.repeat_cycles,
-            first_issue=add_interval(invoice.issued_at, schedule_request.repeat, 1),
+            start=invoice.issued_at,
         )
     return RedirectResponse(url="/?notice=send-unconfirmed" if warnings else "/", status_code=303)
 
