@@ -4,7 +4,7 @@ Duebell is a sandbox demo, but it can be hosted for several people. This page ex
 
 ## Sign-in
 
-- A middleware turns away every request without a valid session, except four public paths: sign-in, `/healthz`, static files and the PayPal webhook. It denies by default, so a new route is protected without extra code. A test lists every route and checks this.
+- A middleware turns away every request without a valid session, except five public paths: sign-in, sign-out, `/healthz`, static files and the PayPal webhook. Sign-out is public so an expired session can still sign out; it only clears the cookie. A page or form post without a session redirects to sign-in, and a JSON route answers `401`. It denies by default, so a new route is protected without extra code. A test lists every route and checks this.
 - Duebell hashes passwords with scrypt and a random salt. Each hash records its cost, so the cost can rise later.
 - The session is a cookie holding the user ID and an expiry, signed with `SECRET_KEY`. It is HttpOnly, SameSite=Lax, and Secure when `COOKIE_SECURE=true`. It lasts 12 hours.
 - SameSite=Lax also stops other sites from posting forms with the cookie.
