@@ -1,4 +1,4 @@
-"""Runtime settings for Duebell (issues #9, #21, #24, #26; ADRs 0005, 0006, 0008)."""
+"""Runtime settings for Duebell (issues #9, #21, #24, #26, #47; ADRs 0005, 0006, 0008)."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ class Settings:
     anthropic_api_key: str = ""
     anthropic_base_url: str = ""
     anthropic_auth_token: str = ""
-    anthropic_model: str = "claude-3-5-haiku-20241022"
+    anthropic_model: str = "claude-haiku-5-5"
     amount_cap_cents: int = 1_000_000
     allowed_currencies: tuple[str, ...] = ("USD",)
     terms_min_days: int = 0
@@ -74,7 +74,7 @@ def get_settings() -> Settings:
         anthropic_api_key=_env("ANTHROPIC_API_KEY", "").strip(),
         anthropic_base_url=_env("ANTHROPIC_BASE_URL", "").rstrip("/"),
         anthropic_auth_token=_env("ANTHROPIC_AUTH_TOKEN", "").strip(),
-        anthropic_model=_env("ANTHROPIC_MODEL", "claude-3-5-haiku-20241022").strip(),
+        anthropic_model=_env("ANTHROPIC_MODEL", "claude-haiku-5-5").strip(),
         amount_cap_cents=int(_env("AMOUNT_CAP_CENTS", "1000000")),
         allowed_currencies=currencies or ("USD",),
         terms_min_days=int(_env("TERMS_MIN_DAYS", "0")),

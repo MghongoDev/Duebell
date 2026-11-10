@@ -1,8 +1,9 @@
-"""Turn a plain-English description into a validated invoice proposal (issue #14).
+"""Turn a plain-English description into a checked AI draft (issues #14, #47).
 
 The model is treated as an untrusted form filler. Its answer must be JSON with
-only known keys, and the result still passes through the same validation as the
-manual form. Prompt injection in the description is data, never instructions.
+only known keys and the right types, and the fields it fills still pass the
+same validation as the manual form. Fields it leaves out stay empty for the
+person to fill in; nothing is guessed. Prompt injection in the description is data, never instructions.
 Mock mode uses a narrow parser for the canonical demo sentence and refuses
 everything else. See ADR 0004.
 """
@@ -11,9 +12,10 @@ from __future__ import annotations
 
 import json
 import re
+from decimal import Decimal, InvalidOperation
 
 import httpx
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from app.config import Settings
 from app.retry import RetryableFailure, call_with_retries
@@ -71,18 +73,76 @@ def extract_json(text: str) -> dict:
     return payload
 
 
-def validate_payload(payload: dict, settings: Settings) -> InvoiceProposal:
+class AIDraft(BaseModel):
+    """The model's answer, checked strictly and with no defaults (issue #47).
+
+    A field the model leaves out, sets to null or leaves blank stays None, so
+    the form shows it empty for the person to fill in. A value of the wrong
+    type, such as `true` for terms_days, is refused rather than coerced.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    client_name: str | None = None
+    client_email: str | None = None
+    description: str | None = None
+    amount: Decimal | None = None
+    currency: str | None = None
+    terms_days: int | None = None
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _amount_from_text_or_number(cls, value):
+        # Strict mode takes only Decimal objects, but JSON carries amounts as
+        # text or numbers. Turn those into Decimal; refuse anything else.
+        if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+            return value
+        if isinstance(value, str) and not value.strip():
+            return None
+        try:
+            return Decimal(str(value).strip())
+        except InvalidOperation as exc:
+            raise ValueError("not a number") from exc
+
+    @field_validator("client_name", "client_email", "description", "currency", mode="after")
+    @classmethod
+    def _blank_is_missing(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+    @field_validator("currency", mode="after")
+    @classmethod
+    def _currency_upper(cls, value: str | None) -> str | None:
+        return value.upper() if value else value
+
+    @property
+    def missing(self) -> list[str]:
+        return [name for name in type(self).model_fields if getattr(self, name) is None]
+
+
+def validate_payload(payload: dict, settings: Settings) -> AIDraft:
     extra = set(payload) - ALLOWED_FIELDS
     if extra:
         raise LLMError("The AI returned fields duebell does not accept: " + ", ".join(sorted(extra)))
     try:
-        proposal = InvoiceProposal.model_validate(payload)
+        draft = AIDraft.model_validate(payload)
     except ValidationError as exc:
-        raise LLMError("The AI answer was incomplete. Check the fields and try again.") from exc
-    errors = validate_proposal(proposal, settings)
+        fields = sorted({str(error["loc"][0]) for error in exc.errors() if error["loc"]})
+        raise LLMError(
+            "The AI gave a wrong type for: " + ", ".join(fields) + ". Try again or fill the form."
+        ) from exc
+    # Check the fields the model did fill with the manual form's rules. A
+    # missing field is left for the person, so its error is not raised here.
+    present = {name: value for name, value in draft.model_dump().items() if value is not None}
+    errors = [
+        error
+        for error in validate_proposal(InvoiceProposal(**present), settings)
+        if error.field not in draft.missing
+    ]
     if errors:
         raise LLMError("; ".join(error.message for error in errors))
-    return proposal
+    return draft
 
 
 def _messages_url(base_url: str) -> str:
@@ -139,7 +199,7 @@ def _call_model(text: str, settings: Settings) -> dict:
     return extract_json(text_out)
 
 
-def _mock_parse(text: str, settings: Settings) -> InvoiceProposal:
+def _mock_parse(text: str, settings: Settings) -> AIDraft:
     match = MOCK_PATTERN.match(text.strip())
     if not match:
         raise LLMError(
@@ -160,7 +220,7 @@ def live_ready(settings: Settings) -> bool:
 
 
 def build_parser(settings: Settings):
-    def parse(text: str) -> InvoiceProposal:
+    def parse(text: str) -> AIDraft:
         if settings.llm_mode != "live":
             return _mock_parse(text, settings)
         # Without a credential and a base URL, live mode falls back to the

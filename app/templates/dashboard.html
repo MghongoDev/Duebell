@@ -457,6 +457,11 @@ document.addEventListener("click", (event) => {
   runAction(button, "Working...", `/api/reminders/${id}/${action}`);
 });
 
+document.querySelector(".invoice-form").addEventListener("input", (event) => {
+  event.target.classList.remove("missing");
+  event.target.removeAttribute("aria-invalid");
+});
+
 document.getElementById("ai-fill").addEventListener("click", async () => {
   const text = document.getElementById("ai-text").value.trim();
   if (!text) {
@@ -478,13 +483,28 @@ document.getElementById("ai-fill").addEventListener("click", async () => {
     if (!response.ok) {
       showError(data.error || "Could not parse that. Fill the form instead.");
     } else {
+      // A field the AI left out comes back empty and named in `missing`.
+      // Mark it so the person fills it in; nothing is guessed (issue #47).
+      const missing = new Set(data.missing || []);
+      const labels = [];
       for (const [key, value] of Object.entries(data.proposal)) {
-        const field = document.querySelector(`[name="${key}"]`);
+        const field = document.querySelector(`.invoice-form [name="${key}"]`);
         if (!field) continue;
         field.value = value;
-        if (field.tagName === "SELECT" && field.value !== String(value)) {
-          showError(`${value} is not an allowed currency. Pick one from the list.`);
+        if (missing.has(key)) {
+          field.setAttribute("aria-invalid", "true");
+          field.classList.add("missing");
+          labels.push(field.closest("label")?.querySelector("span")?.textContent || key);
+        } else {
+          field.removeAttribute("aria-invalid");
+          field.classList.remove("missing");
+          if (field.tagName === "SELECT" && field.value !== String(value)) {
+            showError(`${value} is not an allowed currency. Pick one from the list.`);
+          }
         }
+      }
+      if (labels.length) {
+        showError(`The AI left these out: ${labels.join(", ")}. Fill them in before you create the invoice.`);
       }
       previewRisk();
     }

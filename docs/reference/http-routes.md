@@ -21,7 +21,7 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 | Method | Path | Does |
 | --- | --- | --- |
 | `POST` | `/invoices` | Creates and sends an invoice from the form. Fields: `client_name`, `client_email`, `description`, `amount`, `currency`, `terms_days`. Optional: `repeat` (`WEEK` or `MONTH`) with `repeat_cycles`, or `instalments` (2 to 6) with `instalment_interval`. Redirects to `/` on success. Returns the page with field errors and `422` on bad input, or `502` when PayPal fails. |
-| `POST` | `/parse` | Field `description`, the free text. Returns `{"proposal": {...}}` with the six form fields. Creates nothing. `422` if the parser or validation rejects it. |
+| `POST` | `/parse` | Field `description`, the free text. Returns `{"proposal": {...}, "missing": [...]}` with the six form fields. A field the model left out is an empty string and is named in `missing`. Creates nothing. `422` if the answer has an unknown key or a wrongly typed value, or a filled field fails validation. |
 | `GET` | `/api/invoices` | The user's invoices as dashboard rows. |
 | `POST` | `/api/invoices/{invoice_id}/refresh` | Reads the status from PayPal and stores it. Returns `{"status": ...}`. |
 | `POST` | `/api/invoices/{invoice_id}/simulate-payment` | Records a payment through the gateway and marks the invoice `PAID`. |

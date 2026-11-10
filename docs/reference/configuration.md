@@ -32,7 +32,7 @@ Any value other than those listed falls back to `mock`.
 | `ANTHROPIC_BASE_URL` | empty | Live mode needs it. |
 | `ANTHROPIC_API_KEY` | empty | Live mode needs this or `ANTHROPIC_AUTH_TOKEN`. |
 | `ANTHROPIC_AUTH_TOKEN` | empty | An alternative to the API key. |
-| `ANTHROPIC_MODEL` | `claude-3-5-haiku-20241022` | The model that fills the form. |
+| `ANTHROPIC_MODEL` | `claude-haiku-5-5` | The model that fills the form. |
 | `LLM_TIMEOUT_SECONDS` | `30` | How long one model call may take. |
 
 If live mode lacks a credential or a base URL, parsing falls back to the mock parser.
