@@ -1,4 +1,4 @@
-"""Runtime settings for Duebell (issues #9, #21, #24, #26, #38, #47; ADRs 0005, 0006, 0008)."""
+"""Runtime settings for Duebell (issues #9, #21, #24, #26, #38, #47, #85; ADRs 0005, 0006, 0008)."""
 
 from __future__ import annotations
 
@@ -11,10 +11,31 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def _bool(value: str | None, default: bool = False) -> bool:
-    if value is None:
+class ConfigError(ValueError):
+    """A setting holds a value Duebell cannot read. Startup stops (issue #85)."""
+
+
+TRUE_WORDS = frozenset({"1", "true", "yes", "on"})
+FALSE_WORDS = frozenset({"0", "false", "no", "off"})
+
+
+def _bool(name: str, default: bool) -> bool:
+    """Read an on/off setting. Every one goes through here (issue #85).
+
+    Unset or blank keeps the default. Case and surrounding spaces are ignored.
+    Any other word stops startup rather than picking a side.
+    """
+    value = _env(name).strip().lower()
+    if not value:
         return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+    if value in TRUE_WORDS:
+        return True
+    if value in FALSE_WORDS:
+        return False
+    raise ConfigError(
+        f"{name}={os.getenv(name, '').strip()!r} is not an on/off value. "
+        "Use one of: on, off, yes, no, true, false, 1, 0."
+    )
 
 
 @dataclass(frozen=True)
@@ -68,7 +89,7 @@ def get_settings() -> Settings:
     )
     return Settings(
         paypal_mode=_env("PAYPAL_MODE", "mock").strip().lower(),
-        mock_webhooks=_bool(_env("MOCK_WEBHOOKS", "false")),
+        mock_webhooks=_bool("MOCK_WEBHOOKS", False),
         llm_mode=_env("LLM_MODE", "mock").strip().lower(),
         paypal_client_id=_env("PAYPAL_CLIENT_ID", "").strip(),
         paypal_client_secret=_env("PAYPAL_CLIENT_SECRET", "").strip(),
@@ -93,8 +114,8 @@ def get_settings() -> Settings:
         smtp_username=_env("SMTP_USERNAME", "").strip(),
         smtp_password=_env("SMTP_PASSWORD", ""),
         smtp_from=_env("SMTP_FROM", "").strip(),
-        smtp_starttls=_env("SMTP_STARTTLS", "true").strip().lower() not in {"0", "false", "no"},
+        smtp_starttls=_bool("SMTP_STARTTLS", True),
         smtp_timeout_seconds=float(_env("SMTP_TIMEOUT_SECONDS", "20")),
         secret_key=_env("SECRET_KEY", "").strip(),
-        cookie_secure=_env("COOKIE_SECURE", "false").strip().lower() in {"1", "true", "yes"},
+        cookie_secure=_bool("COOKIE_SECURE", False),
     )

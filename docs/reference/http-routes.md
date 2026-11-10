@@ -1,6 +1,6 @@
 # HTTP routes
 
-Every route needs a signed-in user except the four public paths: `/login`, `/healthz`, `/static/...` and `/webhooks/paypal` ([ADR 0008](../adr/0008-sign-in-and-ownership.md)). Without a session, a `GET` page redirects to `/login` and anything else returns `401` with `{"ok": false, "error": "Sign in first."}`.
+Every route needs a signed-in user except the five public paths: `/login`, `/logout`, `/healthz`, `/static/...` and `/webhooks/paypal` ([ADR 0008](../adr/0008-sign-in-and-ownership.md)). Without a valid session, as after the 12-hour expiry, a page or form post redirects to `/login` with `303`. Routes under `/api/` and `POST /parse` return `401` with `{"ok": false, "error": "Sign in first."}` instead.
 
 Each route acts only on the signed-in user's records. Another user's record gets the same `404` as a missing one.
 
@@ -13,7 +13,7 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 | `GET` | `/healthz` | Returns `{"ok": true, "service": "duebell"}`. It does not query the database or PayPal. |
 | `GET` | `/login` | The sign-in page. |
 | `POST` | `/login` | Fields `email`, `password`. Sets the session cookie and redirects to `/`. A wrong password, a locked email, an email over 254 characters or without `@`, or a password over 1,024 characters returns `401` with the page. An `Origin` header naming another host returns `403`. |
-| `POST` | `/logout` | Clears the cookie and redirects to `/login`. |
+| `POST` | `/logout` | Clears the cookie and redirects to `/login`, with or without a valid session. |
 | `GET` | `/` | The dashboard. |
 
 ## Invoices
@@ -21,7 +21,7 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 | Method | Path | Does |
 | --- | --- | --- |
 | `POST` | `/invoices` | Creates and sends an invoice from the form. Fields: `client_name`, `client_email`, `description`, `amount`, `currency`, `terms_days`. Optional: `repeat` (`WEEK` or `MONTH`) with `repeat_cycles`, or `instalments` (2 to 6) with `instalment_interval`. Redirects to `/` on success. Returns the page with field errors and `422` on bad input, or `502` when PayPal fails. If PayPal created the invoice but the send failed, the invoice stays a `DRAFT` with its PayPal ID, and a ticked Repeat is kept on it until the invoice is sent. |
-| `POST` | `/parse` | Field `description`, the free text. Returns `{"proposal": {...}, "missing": [...]}` with the six form fields. A field the model left out is an empty string and is named in `missing`. Creates nothing. `422` if the answer has an unknown key or a wrongly typed value, or a filled field fails validation. |
+| `POST` | `/parse` | Field `description`, the free text. Returns `{"proposal": {...}, "missing": [...]}` with the six form fields. A field the model left out is an empty string and is named in `missing`. Creates nothing. `422` if the answer has an unknown key or a wrongly typed value, a filled field fails validation, or the live model reply cannot be read (not JSON, not an object, or no text content). The error message never repeats the reply. |
 | `GET` | `/api/invoices` | The user's invoices as dashboard rows. |
 | `POST` | `/api/invoices/{invoice_id}/refresh` | Reads the status from PayPal and stores it if it moves the invoice forward (see [statuses](data-model.md#invoice)). A sent, overdue or paid invoice starts any Repeat held on it. Returns `{"status": ...}` with the stored status. |
 | `POST` | `/api/invoices/{invoice_id}/send` | Sends a `DRAFT` that PayPal already holds, after a failed send. It reuses the PayPal invoice and never creates another. If the form's Repeat was ticked, the first send that succeeds starts the schedule. Returns `status`, and a `warning` if PayPal did not confirm the send in time; the invoice then counts as sent. `409` unless the invoice is a `DRAFT` with a PayPal ID. `502` if PayPal fails; the invoice stays a draft. |
@@ -49,9 +49,9 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 
 | Method | Path | Does |
 | --- | --- | --- |
-| `POST` | `/api/scheduled/{item_id}/approve` | Creates and sends a pending scheduled invoice. The item is linked to its invoice before PayPal is called, so a retry never creates a second one: if an earlier try saved the invoice but stopped before PayPal created it, creates that one in PayPal; if PayPal holds it unsent, sends it; if PayPal has since sent it, marks the item sent. Returns `status`, `invoice_id`, and a `warning` if PayPal did not confirm the send in time. `409` if the item is not pending or another approval holds it. `502` if PayPal fails; the item stays pending. |
+| `POST` | `/api/scheduled/{item_id}/approve` | Creates and sends a pending scheduled invoice. The item is linked to its invoice before PayPal is called, so a retry never creates a second one: if an earlier try saved the invoice but stopped before PayPal created it, creates that one in PayPal; if PayPal holds it unsent, sends it; if PayPal has since sent it, marks the item sent. Returns `status`, `invoice_id`, and a `warning` if PayPal did not confirm the send in time. `409` if the item is not pending, another approval holds it, or its schedule is not active. `502` if PayPal fails; the item goes back to pending, unless its schedule was cancelled meanwhile, when it stays cancelled. |
 | `POST` | `/api/scheduled/{item_id}/reject` | Skips this invoice. A repeat carries on. |
-| `POST` | `/api/schedules/{schedule_id}/cancel` | Stops the schedule and cancels its upcoming and pending invoices. Sent invoices stay as they are. |
+| `POST` | `/api/schedules/{schedule_id}/cancel` | Stops the schedule and cancels its upcoming and pending invoices, and any an approval is sending. Sent invoices stay as they are. |
 
 ## PayPal webhook
 

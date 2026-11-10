@@ -98,27 +98,52 @@ function clearError() {
   box.textContent = "";
 }
 
+const NO_CONNECTION = "Could not reach the server. Check your connection and try again.";
+
+// Only a fetch that rejects means the server could not be reached. A reply
+// that is not JSON, such as a plain-text 500, is a server error (issue #83).
+async function readJson(response) {
+  try {
+    return await response.json();
+  } catch (error) {
+    return null;
+  }
+}
+
+function serverError(response) {
+  return `The server had an error (status ${response.status}). Try again.`;
+}
+
 async function runAction(button, label, path, options = {}) {
   const original = button.textContent;
+  const restore = () => {
+    button.disabled = false;
+    button.textContent = original;
+  };
   button.disabled = true;
   button.textContent = label;
   clearError();
+  let response;
   try {
-    const response = await fetch(path, { ...options, method: "POST" });
-    const data = await response.json();
-    if (!response.ok) {
-      showError(data.error || "That did not work.");
-      button.disabled = false;
-      button.textContent = original;
-      return;
-    }
-    if (data.warning) window.alert(data.warning);
-    window.location.reload();
+    response = await fetch(path, { ...options, method: "POST" });
   } catch (error) {
-    showError("Could not reach the server. Check your connection and try again.");
-    button.disabled = false;
-    button.textContent = original;
+    showError(NO_CONNECTION);
+    restore();
+    return;
   }
+  const data = await readJson(response);
+  if (!data) {
+    showError(serverError(response));
+    restore();
+    return;
+  }
+  if (!response.ok) {
+    showError(data.error || "That did not work.");
+    restore();
+    return;
+  }
+  if (data.warning) window.alert(data.warning);
+  window.location.reload();
 }
 
 document.addEventListener("click", (event) => {
@@ -213,13 +238,21 @@ document.getElementById("ai-fill").addEventListener("click", async () => {
   button.textContent = "Filling...";
   clearError();
   try {
-    const response = await fetch("/parse", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ description: text }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
+    let response;
+    try {
+      response = await fetch("/parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ description: text }),
+      });
+    } catch (error) {
+      showError(NO_CONNECTION);
+      return;
+    }
+    const data = await readJson(response);
+    if (!data) {
+      showError(serverError(response));
+    } else if (!response.ok) {
       showError(data.error || "Could not parse that. Fill the form instead.");
     } else {
       // A field the AI left out comes back empty and named in `missing`.
@@ -247,8 +280,6 @@ document.getElementById("ai-fill").addEventListener("click", async () => {
       }
       previewRisk();
     }
-  } catch (error) {
-    showError("Could not reach the server. Check your connection and try again.");
   } finally {
     button.disabled = false;
     button.textContent = original;

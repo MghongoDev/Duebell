@@ -1,8 +1,10 @@
-"""Seed synthetic clients and invoices for the Duebell demo (issues #13, #24; ADR 0008).
+"""Seed synthetic clients and invoices for the Duebell demo (issues #13, #24, #86; ADR 0008).
 
 The seed belongs to a demo user. --if-empty seeds only a database with no
 users, and --require-password refuses the published default password, which
-is how a hosted instance starts.
+is how a hosted instance starts. A bare rerun on a seeded database changes
+nothing, and an unusable DEMO_PASSWORD exits with one line, not a traceback
+(issue #86).
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlmodel import Session, select
 
-from app.auth import create_user
+from app.auth import AuthError, create_user
 from app.config import get_settings
 from app.models import Client, Invoice, InvoiceStatus, User, init_db, make_engine, utcnow
 from app.risk import HistoryInvoice, score_invoice
@@ -76,7 +78,23 @@ def seed_if_empty(session: Session, require_password: bool = False) -> dict | No
     return seed(session, demo_user(session, require_password).id)
 
 
+def already_seeded(session: Session) -> bool:
+    """True once the demo data is in, so a rerun can stop before it writes (issue #86).
+
+    Seed invoice numbers are unique across the database, and seed clients are
+    unique per demo user, so either one present means a second seed would fail.
+    """
+    if session.exec(select(Invoice).where(Invoice.invoice_number.startswith("DUE-SEED-"))).first():
+        return True
+    user = session.exec(select(User).where(User.email == DEMO_EMAIL)).first()
+    if user is None:
+        return False
+    emails = [email for _, email, *_ in CLIENTS]
+    return session.exec(select(Client).where(Client.user_id == user.id, Client.email.in_(emails))).first() is not None
+
+
 def seed(session: Session, user_id: int | None = None) -> dict:
+    """Write the six clients and their invoices in one commit, so a failure leaves none (issue #86)."""
     if user_id is None:
         user_id = demo_user(session).id
     now = utcnow()
@@ -86,8 +104,7 @@ def seed(session: Session, user_id: int | None = None) -> dict:
     for index, (name, email, habit, history_count, amount, open_due_offset) in enumerate(CLIENTS):
         client = Client(name=name, email=email, user_id=user_id)
         session.add(client)
-        session.commit()
-        session.refresh(client)
+        session.flush()
 
         prior: list[HistoryInvoice] = []
         for step in range(history_count):
@@ -114,8 +131,6 @@ def seed(session: Session, user_id: int | None = None) -> dict:
             session.add(invoice)
             prior.append(HistoryInvoice(amount_cents=amount, due_at=due, paid_at=paid))
             total_invoices += 1
-
-        session.commit()
 
         counter += 1
         due = now + timedelta(days=open_due_offset)
@@ -159,13 +174,20 @@ def main() -> None:
     engine = make_engine(settings.database_url)
     init_db(engine)
     with Session(engine) as session:
-        if args.if_empty:
-            summary = seed_if_empty(session, args.require_password)
-            if summary is None:
-                print("The database already has users. Nothing seeded.")
+        try:
+            if args.if_empty:
+                summary = seed_if_empty(session, args.require_password)
+                if summary is None:
+                    print("The database already has users. Nothing seeded.")
+                    return
+            elif already_seeded(session):
+                print("The demo data is already seeded. Nothing changed. Use --reset to start over.")
                 return
-        else:
-            summary = seed(session, demo_user(session, args.require_password).id)
+            else:
+                summary = seed(session, demo_user(session, args.require_password).id)
+        except AuthError as error:
+            # create_user checks the password before it writes, so nothing is left behind.
+            raise SystemExit(f"DEMO_PASSWORD is not usable: {error}") from None
     print(f"Seeded {summary['clients']} clients and {summary['invoices']} invoices.")
     print(f"Sign in as {DEMO_EMAIL}. The password is DEMO_PASSWORD, or {DEFAULT_DEMO_PASSWORD} if unset.")
     print("Training data is synthetic. The risk model is a demonstration, not a validated predictor.")

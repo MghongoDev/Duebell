@@ -1,9 +1,12 @@
 """AI parsing guardrail tests (issue #14)."""
 
+import json
 from decimal import Decimal
 
+import httpx
 import pytest
 
+from app import llm
 from app.config import Settings
 from app.llm import LLMError, build_parser, extract_json, validate_payload
 from app.validation import InvoiceProposal
@@ -176,3 +179,62 @@ def test_parse_route_returns_missing_fields_empty_and_named(client):
 
 def test_the_default_model_is_current():
     assert Settings().anthropic_model == "claude-haiku-5-5"
+
+
+# A live model endpoint, or a proxy in front of it, can answer 200 with a body
+# that is not the expected reply. Each such body gives a plain LLMError, never
+# an unhandled error, and the message does not echo the body (issue #83).
+LIVE_WITH_URL = Settings(llm_mode="live", anthropic_api_key="test", anthropic_base_url="https://model.test")
+
+MALFORMED_REPLIES = [
+    pytest.param(b"<html><body>502 Bad Gateway SECRET-PAGE</body></html>", "text/html", id="html"),
+    pytest.param(b'["SECRET-PAGE", 2]', "application/json", id="json-list"),
+    pytest.param(b'"SECRET-PAGE"', "application/json", id="json-string"),
+    pytest.param(b"", "application/json", id="empty"),
+    pytest.param(b'{"content": "SECRET-PAGE"}', "application/json", id="content-not-blocks"),
+    pytest.param(b'{"content": [{"type": "text", "text": 5}]}', "application/json", id="text-not-string"),
+    pytest.param(b'{"choices": ["SECRET-PAGE"]}', "application/json", id="choice-not-object"),
+    pytest.param(b'{"choices": [{"message": "SECRET-PAGE"}]}', "application/json", id="message-not-object"),
+    pytest.param(
+        b'{"choices": [{"message": {"content": ["SECRET-PAGE"]}}]}', "application/json", id="content-not-text"
+    ),
+]
+
+
+def fake_model(monkeypatch, body: bytes, content_type: str) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body, headers={"content-type": content_type})
+
+    real_client = httpx.Client
+    monkeypatch.setattr(
+        llm.httpx,
+        "Client",
+        lambda timeout=None: real_client(transport=httpx.MockTransport(handler), timeout=timeout),
+    )
+
+
+@pytest.mark.parametrize(("body", "content_type"), MALFORMED_REPLIES)
+def test_a_malformed_model_reply_is_a_plain_llm_error(monkeypatch, body, content_type):
+    fake_model(monkeypatch, body, content_type)
+    with pytest.raises(LLMError) as caught:
+        build_parser(LIVE_WITH_URL)("Invoice Acme 1200")
+    assert "SECRET-PAGE" not in str(caught.value)
+
+
+@pytest.mark.parametrize(("body", "content_type"), MALFORMED_REPLIES[:2])
+def test_parse_route_gives_422_for_an_html_or_list_reply(client, monkeypatch, body, content_type):
+    fake_model(monkeypatch, body, content_type)
+    client.app.state.llm = build_parser(LIVE_WITH_URL)
+    response = client.post("/parse", data={"description": "Invoice Acme 1200"})
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error == llm.UNREADABLE_REPLY
+    assert "SECRET-PAGE" not in error
+
+
+def test_a_well_formed_live_reply_still_fills_the_form(monkeypatch):
+    reply = {"content": [{"type": "text", "text": json.dumps(PAYLOAD)}]}
+    fake_model(monkeypatch, json.dumps(reply).encode(), "application/json")
+    draft = build_parser(LIVE_WITH_URL)("Invoice Acme 1200")
+    assert draft.amount == Decimal("1200.00")
+    assert draft.missing == []
