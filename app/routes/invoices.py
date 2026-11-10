@@ -109,7 +109,7 @@ def create_invoice_form(
             session,
             current_user_id(request),
             email=proposal.client_email,
-            amount_cents=proposal_to_cents(proposal.amount),
+            amount_cents=proposal_to_cents(proposal.amount, proposal.currency),
             terms_days=proposal.terms_days,
             currency=proposal.currency,
         )
@@ -126,7 +126,7 @@ def create_invoice_form(
             user_id=current_user_id(request),
             client_id=client.id,
             description=proposal.description.strip(),
-            amount_cents=proposal_to_cents(proposal.amount),
+            amount_cents=proposal_to_cents(proposal.amount, proposal.currency),
             currency=proposal.currency.strip().upper(),
             terms_days=proposal.terms_days,
         )

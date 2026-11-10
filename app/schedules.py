@@ -11,11 +11,11 @@ from __future__ import annotations
 import calendar
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from decimal import Decimal
 
 from sqlmodel import Session, select
 
 from app.config import Settings
+from app.currency import from_minor_units
 from app.models import (
     Client,
     IntervalUnit,
@@ -116,7 +116,7 @@ def add_interval(start: datetime, unit: str, count: int) -> datetime:
 
 
 def split_amount(total_cents: int, parts: int) -> list[int]:
-    """Split cents into parts that differ by at most one cent and sum exactly."""
+    """Split minor units into parts that differ by at most one unit and sum exactly."""
     if not MIN_INSTALMENTS <= parts <= MAX_INSTALMENTS:
         raise ValueError(f"Choose between {MIN_INSTALMENTS} and {MAX_INSTALMENTS} instalments.")
     base, extra = divmod(total_cents, parts)
@@ -271,7 +271,7 @@ def approve_scheduled(
                 client_name=client.name,
                 client_email=client.email,
                 description=item.description,
-                amount=Decimal(item.amount_cents) / 100,
+                amount=from_minor_units(item.amount_cents, schedule.currency),
                 currency=schedule.currency,
                 terms_days=schedule.terms_days,
             )
@@ -345,7 +345,7 @@ def schedule_rows(session: Session, scope: Scope) -> dict:
                         "id": item.id,
                         "client_name": name,
                         "description": item.description,
-                        "amount_display": money(item.amount_cents),
+                        "amount_display": money(item.amount_cents, schedule.currency),
                         "currency": schedule.currency,
                         "issue_display": as_utc(item.issue_on).strftime("%d %b %Y"),
                         "kind": schedule.kind,
@@ -362,7 +362,7 @@ def schedule_rows(session: Session, scope: Scope) -> dict:
                     "kind": schedule.kind,
                     "client_name": name,
                     "description": schedule.description,
-                    "amount_display": money(schedule.amount_cents),
+                    "amount_display": money(schedule.amount_cents, schedule.currency),
                     "currency": schedule.currency,
                     "every": every,
                     "next_display": as_utc(upcoming[0].issue_on).strftime("%d %b %Y") if upcoming else "",

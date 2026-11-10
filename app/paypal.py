@@ -18,6 +18,7 @@ from uuid import uuid4
 import httpx
 
 from app.config import Settings
+from app.currency import paypal_value
 from app.models import InvoiceStatus
 from app.retry import RetryableFailure, call_with_retries
 
@@ -221,7 +222,7 @@ class SandboxPayPal:
                 {
                     "name": description,
                     "quantity": "1",
-                    "unit_amount": {"currency_code": currency, "value": f"{amount_cents / 100:.2f}"},
+                    "unit_amount": {"currency_code": currency, "value": paypal_value(amount_cents, currency)},
                 }
             ],
         }
@@ -255,7 +256,7 @@ class SandboxPayPal:
             f"/v2/invoicing/invoices/{paypal_invoice_id}/payments",
             json={
                 "method": "BANK_TRANSFER",
-                "amount": {"currency_code": currency, "value": f"{amount_cents / 100:.2f}"},
+                "amount": {"currency_code": currency, "value": paypal_value(amount_cents, currency)},
                 "date": datetime.now(timezone.utc).date().isoformat(),
             },
         )
@@ -334,7 +335,7 @@ class ToolkitPayPal(SandboxPayPal):
                 "invoice_id": paypal_invoice_id,
                 "method": "BANK_TRANSFER",
                 "payment_date": datetime.now(timezone.utc).date().isoformat(),
-                "amount": {"currency_code": currency, "value": f"{amount_cents / 100:.2f}"},
+                "amount": {"currency_code": currency, "value": paypal_value(amount_cents, currency)},
             },
         )
 

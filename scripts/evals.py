@@ -228,11 +228,11 @@ def run_reminder_eval(settings: Settings) -> bool:
             tone == expected_tone,
             "Acme Studio" in text,
             invoice.invoice_number in text,
-            money(invoice.amount_cents) in text,
+            money(invoice.amount_cents, invoice.currency) in text,
             invoice.due_at.strftime("%d %b %Y") in text,
         ]
         amounts = re.findall(r"\d[\d,]*\.\d{2}", text)
-        checks.append(amounts == [money(invoice.amount_cents)])
+        checks.append(amounts == [money(invoice.amount_cents, invoice.currency)])
         if all(checks):
             passed += 1
         else:

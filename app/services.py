@@ -13,6 +13,7 @@ from uuid import uuid4
 from sqlmodel import Session, select
 
 from app.config import Settings
+from app.currency import format_amount
 from app.models import Client, Event, Invoice, InvoiceStatus, utcnow
 from app.ownership import Scope, get_owned, owned
 from app.paypal import PayPalError, PayPalGateway
@@ -30,9 +31,9 @@ EVENT_STATUS = {
 }
 
 
-def money(cents: int) -> str:
-    """Format cents for display, without a currency code."""
-    return f"{cents / 100:,.2f}"
+def money(cents: int, currency: str) -> str:
+    """Format minor units for display, without a currency code: "1,200.00" USD, "1,000" JPY (issue #44)."""
+    return format_amount(cents, currency)
 
 
 def find_client(session: Session, email: str, user_id: int | None) -> Client | None:
@@ -96,8 +97,8 @@ def create_invoice(
 ) -> Invoice:
     client = get_or_create_client(session, proposal.client_name, proposal.client_email, user_id)
     now = utcnow()
-    amount_cents = proposal_to_cents(proposal.amount)
     currency = proposal.currency.strip().upper()
+    amount_cents = proposal_to_cents(proposal.amount, currency)
     assessment = score_invoice(
         amount_cents,
         proposal.terms_days,
@@ -204,7 +205,7 @@ def invoice_rows(session: Session, scope: Scope) -> list[dict]:
                 "client_email": client.email if client else "",
                 "description": invoice.description,
                 "amount_cents": invoice.amount_cents,
-                "amount_display": money(invoice.amount_cents),
+                "amount_display": money(invoice.amount_cents, invoice.currency),
                 "currency": invoice.currency,
                 "terms_days": invoice.terms_days,
                 "issued_at": invoice.issued_at.isoformat(timespec="minutes"),
@@ -265,7 +266,7 @@ def _count_by_currency(rows) -> dict[str, int]:
 def _money_by_currency(totals: dict[str, int]) -> str:
     if not totals:
         return "0.00"
-    return " · ".join(f"{money(cents)} {code}" for code, cents in totals.items())
+    return " · ".join(f"{money(cents, code)} {code}" for code, cents in totals.items())
 
 
 def new_invoice_number() -> str:
