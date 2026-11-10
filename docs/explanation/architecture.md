@@ -45,7 +45,7 @@ Every route is a plain `def`, so FastAPI runs it in its threadpool, and the midd
 
 The scheduler runs inside the app process.
 
-- Every 30 minutes it drafts reminders and moves due scheduled invoices to pending, for every user. It never sends.
+- Every 30 minutes it drafts reminders and moves due scheduled invoices to pending, for every user. It never sends. The two steps run apart, each in its own session with its own error log, so if one fails the other still runs.
 - Every six hours it refits the risk comparison once per user.
 
 The scheduler is the only caller that may scan every user. It says so explicitly, with the `EVERY_USER` scope.
