@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.config import Settings
-from app.models import Client, Event, Invoice, InvoiceStatus, utcnow
+from app.models import Client, Event, Invoice, InvoiceStatus, Reminder, ReminderStatus, utcnow
 from app.ownership import Scope, get_owned, owned
 from app.paypal import PayPalError, PayPalGateway, PayPalTimeout
 from app.risk import HistoryInvoice, RiskAssessment, score_invoice
@@ -261,7 +261,9 @@ def dashboard_totals(rows: list[dict]) -> dict:
     # settled. A DRAFT has never been sent, so it is not a debt to collect.
     # Amounts in different currencies are never added together.
     outstanding = _amount_by_currency(
-        row for row in rows if row["status"] == InvoiceStatus.SENT and row.get("paypal_invoice_id")
+        row
+        for row in rows
+        if row["status"] in {InvoiceStatus.SENT, InvoiceStatus.OVERDUE} and row.get("paypal_invoice_id")
     )
     paid = _amount_by_currency(row for row in rows if row["status"] in PAID_STATUSES)
     overdue = sum(1 for row in rows if row["overdue"])
@@ -316,12 +318,29 @@ def apply_status(invoice: Invoice, status: str) -> None:
         invoice.paid_at = utcnow()
 
 
+def reject_drafts_if_closed(session: Session, invoice: Invoice) -> int:
+    """Reject pending reminder drafts once their invoice is paid, cancelled or refunded.
+
+    Nothing should reach a client about a closed invoice (issue #36). The caller commits.
+    """
+    if invoice.status not in CLOSED_STATUSES:
+        return 0
+    drafts = session.exec(
+        select(Reminder).where(Reminder.invoice_id == invoice.id, Reminder.status == ReminderStatus.PENDING)
+    ).all()
+    for draft in drafts:
+        draft.status = ReminderStatus.REJECTED
+        session.add(draft)
+    return len(drafts)
+
+
 def refresh_invoice(session: Session, invoice: Invoice, gateway) -> Invoice:
     if not invoice.paypal_invoice_id:
         return invoice
     status = gateway.get_invoice(invoice.paypal_invoice_id)
     apply_status(invoice, status)
     session.add(invoice)
+    reject_drafts_if_closed(session, invoice)
     session.commit()
     session.refresh(invoice)
     return invoice
@@ -330,9 +349,12 @@ def refresh_invoice(session: Session, invoice: Invoice, gateway) -> Invoice:
 def simulate_payment(session: Session, invoice: Invoice, gateway) -> Invoice:
     if not invoice.paypal_invoice_id:
         raise ValueError("Invoice has no PayPal id yet.")
+    if invoice.status in CLOSED_STATUSES:
+        raise ValueError("This invoice is already closed.")
     gateway.record_payment(invoice.paypal_invoice_id, invoice.amount_cents, invoice.currency)
     apply_status(invoice, InvoiceStatus.PAID)
     session.add(invoice)
+    reject_drafts_if_closed(session, invoice)
     session.commit()
     session.refresh(invoice)
     return invoice
@@ -367,6 +389,7 @@ def handle_webhook(session: Session, gateway, headers: Mapping[str, str], body: 
     if invoice and status:
         apply_status(invoice, status)
         session.add(invoice)
+        reject_drafts_if_closed(session, invoice)
         applied = True
 
     session.add(
