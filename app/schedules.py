@@ -1,4 +1,4 @@
-"""Recurring invoices and instalment plans (issues #24, #25; ADRs 0003, 0007, 0008).
+"""Recurring invoices and instalment plans (issues #24, #25, #39, #40; ADRs 0003, 0007, 0008).
 
 A schedule is the rule: repeat an invoice every interval, or split one amount
 into instalments. Each future invoice is a ScheduledInvoice. The scan moves due
@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select, update
 
 from app.config import Settings
@@ -232,7 +233,12 @@ def _open_items(session: Session, schedule: Schedule) -> list[ScheduledInvoice]:
 
 
 def draft_scheduled(session: Session, now: datetime | None = None, *, scope: Scope) -> list[ScheduledInvoice]:
-    """Move due scheduled invoices to PENDING. Nothing reaches PayPal here."""
+    """Move due scheduled invoices to PENDING. Nothing reaches PayPal here.
+
+    The scheduler and a manual scan can run at once. Each item is claimed with
+    one conditional update, and only the scan that wins queues the next
+    occurrence, so a repeat never gains two (issue #40).
+    """
     now = as_utc(now or utcnow())
     query = owned(select(ScheduledInvoice).where(ScheduledInvoice.status == ScheduledInvoiceStatus.UPCOMING), ScheduledInvoice, scope)
     drafted = []
@@ -242,15 +248,34 @@ def draft_scheduled(session: Session, now: datetime | None = None, *, scope: Sco
         schedule = session.get(Schedule, item.schedule_id)
         if schedule is None or schedule.status == ScheduleStatus.CANCELLED:
             continue
-        item.status = ScheduledInvoiceStatus.PENDING
-        session.add(item)
-        drafted.append(item)
+        if not _claim_upcoming(session, item):
+            session.rollback()
+            continue
         if schedule.kind == ScheduleKind.RECURRING:
+            # Read the schedule again inside the claim, so cycles_left is current.
+            session.refresh(schedule)
             next_issue = add_interval(as_utc(item.issue_on), schedule.interval_unit, schedule.interval_count)
             _queue_next(session, schedule, next_issue, item.sequence + 1)
-    if drafted:
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError:
+            # The next occurrence already exists. The unique index on
+            # (schedule_id, sequence) refused a second; leave this item for later.
+            session.rollback()
+            continue
+        session.refresh(item)
+        drafted.append(item)
     return drafted
+
+
+def _claim_upcoming(session: Session, item: ScheduledInvoice) -> bool:
+    """Move UPCOMING to PENDING in one conditional update. Only one scan wins."""
+    result = session.exec(
+        update(ScheduledInvoice)
+        .where(ScheduledInvoice.id == item.id, ScheduledInvoice.status == ScheduledInvoiceStatus.UPCOMING)
+        .values(status=ScheduledInvoiceStatus.PENDING)
+    )
+    return result.rowcount == 1
 
 
 def _claim(session: Session, item: ScheduledInvoice) -> bool:
