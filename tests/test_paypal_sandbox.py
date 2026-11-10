@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import httpx
 
 from app.config import Settings
-from app.paypal import SandboxPayPal, term_type
+from app.paypal import SandboxPayPal
 
 NOW = datetime(2026, 11, 3, 12, 0, tzinfo=timezone.utc)
 
@@ -50,14 +50,6 @@ def settings(**overrides):
     return Settings(**values)
 
 
-def test_term_mapping_uses_paypal_values():
-    assert term_type(0) == "DUE_ON_RECEIPT"
-    assert term_type(7) == "NET_10"
-    assert term_type(14) == "NET_15"
-    assert term_type(30) == "NET_30"
-    assert term_type(90) == "NET_90"
-
-
 def test_create_invoice_sends_a_valid_payload():
     fake = FakeClient()
     gateway = SandboxPayPal(settings(), client=fake)
@@ -75,7 +67,7 @@ def test_create_invoice_sends_a_valid_payload():
     assert paypal_id == "INV-1"
     body = fake.last_json
     assert body["detail"]["invoice_number"] == "DUE-1"
-    assert body["detail"]["payment_term"]["term_type"] == "NET_15"
+    assert body["detail"]["payment_term"] == {"due_date": "2026-11-03"}
     assert body["items"][0]["unit_amount"] == {"currency_code": "USD", "value": "1200.00"}
     assert body["primary_recipients"][0]["billing_info"]["email_address"] == "billing@acme.test"
 

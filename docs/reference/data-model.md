@@ -19,6 +19,8 @@ Every table that holds a user's data has a `user_id` ([ADR 0008](../adr/0008-sig
 
 Amounts are whole cents. Times are stored in UTC, and every time column reads back as an aware UTC datetime, whichever sqlmodel version is installed.
 
+An invoice's `due_at` is its `issued_at` plus `terms_days`. Duebell sends PayPal that date as the invoice's `due_date`, so the client sees the same **due date** that reminders and the overdue flag use. Terms of 0 days are sent as due on receipt.
+
 ## Statuses
 
 Each set of values below has its own type in the code. The database stores the plain strings, so a database from an older build reads the same.

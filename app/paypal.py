@@ -1,4 +1,4 @@
-"""PayPal gateway for Duebell (issues #10, #11, #21, #29).
+"""PayPal gateway for Duebell (issues #10, #11, #21, #29, #35).
 
 The app talks to one protocol. The mock gateway keeps the demo offline, the
 sandbox gateway calls PayPal's Invoicing v2 REST API, and the toolkit gateway
@@ -34,21 +34,17 @@ class PayPalTimeout(PayPalError):
     """
 
 
-def term_type(days: int) -> str:
-    """Map local net terms to the values PayPal Invoicing accepts."""
-    if days <= 0:
-        return "DUE_ON_RECEIPT"
-    if days <= 10:
-        return "NET_10"
-    if days <= 15:
-        return "NET_15"
-    if days <= 30:
-        return "NET_30"
-    if days <= 45:
-        return "NET_45"
-    if days <= 60:
-        return "NET_60"
-    return "NET_90"
+def payment_term(terms_days: int, due_at: datetime) -> dict:
+    """The payment term PayPal gets: the stored due date itself (issue #35).
+
+    PayPal's NET terms round to 10, 15, 30, 45, 60 or 90 days, so sending one
+    would let PayPal show a date Duebell does not store. PayPal's field notes
+    for detail.payment_term say to send term_type or due_date, not both, so a
+    dated invoice sends only due_date. Terms of 0 days stay due on receipt.
+    """
+    if terms_days <= 0:
+        return {"term_type": "DUE_ON_RECEIPT"}
+    return {"due_date": due_at.date().isoformat()}
 
 
 class PayPalGateway(Protocol):
@@ -87,7 +83,11 @@ class MockPayPal:
 
     def create_invoice(self, **facts) -> str:
         paypal_id = f"MOCK-{uuid4().hex[:12].upper()}"
-        self.invoices[paypal_id] = {**facts, "status": InvoiceStatus.DRAFT}
+        self.invoices[paypal_id] = {
+            **facts,
+            "payment_term": payment_term(facts["terms_days"], facts["due_at"]),
+            "status": InvoiceStatus.DRAFT,
+        }
         return paypal_id
 
     def send_invoice(self, paypal_invoice_id: str) -> None:
@@ -206,7 +206,7 @@ class SandboxPayPal:
             "invoice_date": issued_at.date().isoformat(),
             "currency_code": currency,
             "note": description,
-            "payment_term": {"term_type": term_type(terms_days)},
+            "payment_term": payment_term(terms_days, due_at),
         }
         invoicer: dict = {"business_name": "Duebell"}
         if self.settings.paypal_invoicer_email:

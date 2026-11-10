@@ -89,7 +89,7 @@ def test_create_keeps_payment_terms_on_the_rest_path():
         due_at=NOW + timedelta(days=14),
     )
     assert paypal_id == "INV-1"
-    assert gw.client.last_json["detail"]["payment_term"] == {"term_type": "NET_15"}
+    assert gw.client.last_json["detail"]["payment_term"] == {"due_date": "2026-11-17"}
     assert toolkit.calls == []
 
 
