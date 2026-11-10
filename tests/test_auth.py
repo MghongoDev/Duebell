@@ -51,7 +51,9 @@ def test_every_private_route_turns_away_an_anonymous_request(app):
         url = url.replace("{item_id}", "1").replace("{schedule_id}", "1")
         for method in getattr(route, "methods", set()) - {"HEAD"}:
             response = anonymous.request(method, url, follow_redirects=False)
-            if method == "GET" and not url.startswith("/api/"):
+            # Pages and form posts send the person to sign in; the JSON
+            # routes answer 401 (issue #84).
+            if not url.startswith("/api/") and url != "/parse":
                 assert response.status_code == 303 and response.headers["location"] == "/login", url
             else:
                 assert response.status_code == 401, (method, url)
@@ -120,6 +122,36 @@ def test_sign_out_ends_the_session(client):
     client.post("/logout", follow_redirects=False)
     client.cookies.clear()
     assert client.get("/api/invoices").status_code == 401
+
+
+def expired_session(app) -> TestClient:
+    """A client holding a session cookie past its 12-hour expiry."""
+    signed_in = sign_in(TestClient(app), "expired@duebell.test")
+    cookie = make_session_cookie(app.state.secret_key, signed_in.user_id, now=time.time() - 13 * 3600)
+    return TestClient(app, cookies={COOKIE_NAME: cookie})
+
+
+def test_expired_session_form_post_goes_to_sign_in(app):
+    response = expired_session(app).post("/invoices", data=FORM, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
+
+
+def test_sign_out_clears_the_cookie_with_or_without_a_session(app, client):
+    for who in (client, expired_session(app), TestClient(app)):
+        response = who.post("/logout", follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"] == "/login"
+        header = response.headers["set-cookie"].lower()
+        assert COOKIE_NAME in header and "max-age=0" in header
+
+
+def test_expired_session_api_routes_still_answer_json(app):
+    expired = expired_session(app)
+    for method, url in (("GET", "/api/invoices"), ("POST", "/api/reminders/scan"), ("POST", "/parse")):
+        response = expired.request(method, url, follow_redirects=False)
+        assert response.status_code == 401, (method, url)
+        assert response.json() == {"ok": False, "error": "Sign in first."}
 
 
 def test_cookie_flags(app):

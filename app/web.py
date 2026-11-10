@@ -29,7 +29,12 @@ from app.routes import auth, dashboard, invoices, reminders, risk, schedules, we
 from app.routes.common import BASE_DIR
 from app.schedules import release_interrupted
 
-PUBLIC_PATHS = {"/login", "/healthz", "/webhooks/paypal"}
+# /logout is public so it clears the cookie and redirects even when the
+# session has already expired (issue #84). It only ever signs out.
+PUBLIC_PATHS = {"/login", "/logout", "/healthz", "/webhooks/paypal"}
+# Routes called by scripts, not by a page or form; without a session they
+# answer 401 with JSON instead of a redirect (issue #84).
+JSON_PATHS = {"/parse"}
 ROUTERS = (auth, dashboard, invoices, risk, schedules, reminders, webhooks)
 
 
@@ -119,7 +124,9 @@ def create_app(
             # The database read runs in the threadpool, off the event loop (issue #48).
             user = await run_in_threadpool(_load_user, request.app.state.engine, user_id)
         if user is None:
-            if request.method == "GET" and not path.startswith("/api/"):
+            # Pages and form posts go to sign-in, so an expired session never
+            # shows raw JSON in place of a page (issue #84).
+            if not path.startswith("/api/") and path not in JSON_PATHS:
                 return RedirectResponse(url="/login", status_code=303)
             return JSONResponse({"ok": False, "error": "Sign in first."}, status_code=401)
         request.state.user = user
