@@ -14,7 +14,8 @@ def test_security_headers_are_present(client):
     response = client.get("/healthz")
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
-    assert response.headers["referrer-policy"] == "no-referrer"
+    # same-origin, not no-referrer, so a browser sends its real Origin on sign-in.
+    assert response.headers["referrer-policy"] == "same-origin"
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
 
 

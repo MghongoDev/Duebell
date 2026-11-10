@@ -1,4 +1,4 @@
-"""Runtime settings for Duebell (issues #9, #21, #24, #26, #47; ADRs 0005, 0006, 0008)."""
+"""Runtime settings for Duebell (issues #9, #21, #24, #26, #38, #47; ADRs 0005, 0006, 0008)."""
 
 from __future__ import annotations
 
@@ -20,6 +20,9 @@ def _bool(value: str | None, default: bool = False) -> bool:
 @dataclass(frozen=True)
 class Settings:
     paypal_mode: str = "mock"
+    # Mock mode cannot check a webhook's signature, so it refuses webhooks
+    # unless this is on. Tests and the local demo turn it on (issue #38).
+    mock_webhooks: bool = False
     llm_mode: str = "mock"
     paypal_client_id: str = ""
     paypal_client_secret: str = ""
@@ -65,6 +68,7 @@ def get_settings() -> Settings:
     )
     return Settings(
         paypal_mode=_env("PAYPAL_MODE", "mock").strip().lower(),
+        mock_webhooks=_bool(_env("MOCK_WEBHOOKS", "false")),
         llm_mode=_env("LLM_MODE", "mock").strip().lower(),
         paypal_client_id=_env("PAYPAL_CLIENT_ID", "").strip(),
         paypal_client_secret=_env("PAYPAL_CLIENT_SECRET", "").strip(),

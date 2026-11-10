@@ -11,6 +11,7 @@ The blueprint also:
 
 - generates `SECRET_KEY`,
 - sets `COOKIE_SECURE=true`, since Render serves HTTPS,
+- leaves `MOCK_WEBHOOKS` off, so the mock demo refuses webhooks it cannot check,
 - starts with `scripts/seed.py --if-empty --require-password`, then the app.
 
 ## What the start command does

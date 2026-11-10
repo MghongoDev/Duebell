@@ -15,14 +15,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.config import Settings
+from app.currency import format_amount
 from app.models import Client, Event, Invoice, InvoiceStatus, Reminder, ReminderStatus, as_utc, utcnow
 from app.ownership import Scope, get_owned, owned
-from app.paypal import PayPalError, PayPalGateway, PayPalTimeout
+from app.paypal import WEBHOOKS_OFF, PayPalError, PayPalGateway, PayPalTimeout
 from app.risk import HistoryInvoice, RiskAssessment, limited_data_reason, score_invoice
 from app.validation import InvoiceProposal, proposal_to_cents
 
 PAID_STATUSES = {InvoiceStatus.PAID, InvoiceStatus.MARKED_AS_PAID}
 CLOSED_STATUSES = PAID_STATUSES | {InvoiceStatus.CANCELLED, InvoiceStatus.REFUNDED}
+KNOWN_STATUSES = set(InvoiceStatus)
 # Never part of a client's payment history (issue #46).
 NOT_HISTORY = {InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED}
 
@@ -34,9 +36,9 @@ EVENT_STATUS = {
 }
 
 
-def money(cents: int) -> str:
-    """Format cents for display, without a currency code."""
-    return f"{cents / 100:,.2f}"
+def money(cents: int, currency: str) -> str:
+    """Format minor units for display, without a currency code: "1,200.00" USD, "1,000" JPY (issue #44)."""
+    return format_amount(cents, currency)
 
 
 def find_client(session: Session, email: str, user_id: int | None) -> Client | None:
@@ -139,8 +141,8 @@ def create_invoice(
 ) -> Invoice:
     client = get_or_create_client(session, proposal.client_name, proposal.client_email, user_id)
     now = utcnow()
-    amount_cents = proposal_to_cents(proposal.amount)
     currency = proposal.currency.strip().upper()
+    amount_cents = proposal_to_cents(proposal.amount, currency)
     assessment = score_invoice(
         amount_cents,
         proposal.terms_days,
@@ -257,7 +259,7 @@ def invoice_rows(session: Session, scope: Scope) -> list[dict]:
                 "client_email": client.email if client else "",
                 "description": invoice.description,
                 "amount_cents": invoice.amount_cents,
-                "amount_display": money(invoice.amount_cents),
+                "amount_display": money(invoice.amount_cents, invoice.currency),
                 "currency": invoice.currency,
                 "terms_days": invoice.terms_days,
                 "issued_at": invoice.issued_at.isoformat(timespec="minutes"),
@@ -321,7 +323,7 @@ def _count_by_currency(rows) -> dict[str, int]:
 def _money_by_currency(totals: dict[str, int]) -> str:
     if not totals:
         return "0.00"
-    return " · ".join(f"{money(cents)} {code}" for code, cents in totals.items())
+    return " · ".join(f"{money(cents, code)} {code}" for code, cents in totals.items())
 
 
 def new_invoice_number() -> str:
@@ -332,6 +334,22 @@ def find_by_paypal_id(session: Session, paypal_invoice_id: str) -> Invoice | Non
     return session.exec(
         select(Invoice).where(Invoice.paypal_invoice_id == paypal_invoice_id)
     ).first()
+
+
+def may_replace(current: str, new: str) -> bool:
+    """Whether status new may replace status current (issue #37).
+
+    A status only moves forward. It never leaves a closed status, except that
+    a paid invoice may become refunded, and it never goes back to DRAFT. A
+    status Duebell does not know, such as the gateway's UNKNOWN, never applies.
+    """
+    if new not in KNOWN_STATUSES:
+        return False
+    if new == current:
+        return True
+    if current in CLOSED_STATUSES:
+        return current in PAID_STATUSES and new == InvoiceStatus.REFUNDED
+    return new != InvoiceStatus.DRAFT
 
 
 def apply_status(invoice: Invoice, status: str) -> None:
@@ -360,7 +378,8 @@ def refresh_invoice(session: Session, invoice: Invoice, gateway) -> Invoice:
     if not invoice.paypal_invoice_id:
         return invoice
     status = gateway.get_invoice(invoice.paypal_invoice_id)
-    apply_status(invoice, status)
+    if may_replace(invoice.status, status):
+        apply_status(invoice, status)
     session.add(invoice)
     reject_drafts_if_closed(session, invoice)
     session.commit()
@@ -383,6 +402,9 @@ def simulate_payment(session: Session, invoice: Invoice, gateway) -> Invoice:
 
 
 def handle_webhook(session: Session, gateway, headers: Mapping[str, str], body: str) -> dict:
+    if not gateway.accepts_webhooks:
+        # Mock mode with MOCK_WEBHOOKS off: refuse and store nothing (issue #38).
+        return {"ok": False, "error": WEBHOOKS_OFF}
     if not gateway.verify_webhook(headers, body):
         return {"ok": False, "error": "invalid signature"}
 
@@ -408,7 +430,7 @@ def handle_webhook(session: Session, gateway, headers: Mapping[str, str], body: 
     invoice = find_by_paypal_id(session, paypal_invoice_id) if paypal_invoice_id else None
     if invoice:
         owner_id = invoice.user_id
-    if invoice and status:
+    if invoice and status and may_replace(invoice.status, status):
         apply_status(invoice, status)
         session.add(invoice)
         reject_drafts_if_closed(session, invoice)

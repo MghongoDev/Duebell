@@ -8,7 +8,7 @@ Duebell is a sandbox demo, but it can be hosted for several people. This page ex
 - Duebell hashes passwords with scrypt and a random salt. Each hash records its cost, so the cost can rise later.
 - The session is a cookie holding the user ID and an expiry, signed with `SECRET_KEY`. It is HttpOnly, SameSite=Lax, and Secure when `COOKIE_SECURE=true`. It lasts 12 hours.
 - SameSite=Lax also stops other sites from posting forms with the cookie.
-- Sign-in needs no cookie, so it checks the `Origin` header instead. A post whose `Origin` names a host other than the one it was sent to gets `403`, which stops a hostile page from signing a victim into the attacker's account. Duebell allows a post with no `Origin`, since some clients leave it out.
+- Sign-in needs no cookie, so it checks the `Origin` header instead. A post whose `Origin` names a host other than the one it was sent to gets `403`, which stops a hostile page from signing a victim into the attacker's account. Duebell allows a post with no `Origin`, since some clients leave it out. The referrer policy is `same-origin`: it sends nothing to other sites, and it lets a browser name its own origin. Under `no-referrer` a browser sends `Origin: null` on every form post, which the check refuses.
 - Five sign-in attempts within 15 minutes lock an email until the oldest is 15 minutes old. Each attempt is counted before its password is checked, so attempts sent at the same moment cannot slip past the limit. A correct password clears the count. An unknown email takes the same time and gets the same message as a wrong password.
 - The lockout tracks at most 10,000 emails. It drops entries older than 15 minutes, and when full it drops the least recent email that is not locked, so a flood of new emails cannot free a locked one.
 - There is no public sign-up. Whoever runs the server adds users with `scripts/create_user.py`.
@@ -23,7 +23,8 @@ A webhook event belongs to the owner of the invoice it touches.
 
 ## Other limits
 
-- Duebell asks PayPal to check each webhook's signature before changing anything. It stores each event once by its PayPal ID, so a replay does nothing, and it refuses webhook bodies over 1 MB.
+- In `sandbox` and `toolkit` modes, Duebell asks PayPal to check each webhook's signature before changing anything. Mock mode has no signature to check, so it refuses every webhook with `401` and stores nothing, unless `MOCK_WEBHOOKS` is on. Tests and the local demo turn it on; the Render blueprint leaves it off, so nobody can post fake events to a hosted mock demo. See [configuration](../reference/configuration.md#modes).
+- Duebell stores each event once by its PayPal ID, so a replay does nothing, and it refuses webhook bodies over 1 MB.
 - The model's output is untrusted. It may only fill six known fields, and the same validation as the manual form checks them ([ADR 0004](../adr/0004-llm-as-form-filler.md)).
 - Amounts are capped, currencies come from a list, and text fields have length limits. See [configuration](../reference/configuration.md).
 - Every response carries security headers and a content security policy.
@@ -41,5 +42,6 @@ A webhook event belongs to the owner of the invoice it touches.
 1. Set a long random `SECRET_KEY`.
 2. Serve over HTTPS and set `COOKIE_SECURE=true`.
 3. Set your own `DEMO_PASSWORD`. `scripts/seed.py --require-password` refuses to seed without one.
+4. Leave `MOCK_WEBHOOKS` off.
 
-[Deploy to Render](../how-to/deploy-to-render.md) does all three.
+[Deploy to Render](../how-to/deploy-to-render.md) does all four.

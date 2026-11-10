@@ -16,6 +16,10 @@ _Avoid_: Customer, buyer, account
 A request for payment sent to a client. It carries an amount, a currency, payment terms, a due date, and a status.
 _Avoid_: Bill, payment request
 
+**Minor unit**:
+The smallest unit of a currency that an invoice can carry: a cent for USD, one yen for JPY. Duebell stores every amount as a whole number of minor units, in the `amount_cents` fields.
+_Avoid_: Subunit, decimal amount
+
 **Proposal**:
 A structured invoice draft parsed from free text but not yet confirmed. It is not an invoice until a human confirms it.
 _Avoid_: Draft invoice, parse result

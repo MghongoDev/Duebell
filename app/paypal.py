@@ -1,4 +1,4 @@
-"""PayPal gateway for Duebell (issues #10, #11, #21, #29, #35).
+"""PayPal gateway for Duebell (issues #10, #11, #21, #29, #35, #38).
 
 The app talks to one protocol. The mock gateway keeps the demo offline, the
 sandbox gateway calls PayPal's Invoicing v2 REST API, and the toolkit gateway
@@ -18,8 +18,13 @@ from uuid import uuid4
 import httpx
 
 from app.config import Settings
+from app.currency import paypal_value
 from app.models import InvoiceStatus
 from app.retry import RetryableFailure, call_with_retries
+
+
+# The error a gateway that refuses webhooks returns; the route answers 401 (issue #38).
+WEBHOOKS_OFF = "webhooks are off in mock mode"
 
 
 class PayPalError(RuntimeError):
@@ -48,6 +53,10 @@ def payment_term(terms_days: int, due_at: datetime) -> dict:
 
 
 class PayPalGateway(Protocol):
+    # False means the gateway refuses every webhook before any signature
+    # check: the mock gateway with MOCK_WEBHOOKS off (issue #38).
+    accepts_webhooks: bool
+
     def create_invoice(
         self,
         *,
@@ -74,11 +83,16 @@ class PayPalGateway(Protocol):
 
 
 class MockPayPal:
-    """In-memory PayPal. It records the calls and moves invoice status."""
+    """In-memory PayPal. It records the calls and moves invoice status.
 
-    def __init__(self) -> None:
+    It cannot check a webhook's signature, so it accepts webhooks only when
+    built with accepts_webhooks=True, which MOCK_WEBHOOKS sets (issue #38).
+    """
+
+    def __init__(self, accepts_webhooks: bool = False) -> None:
         self.invoices: dict[str, dict] = {}
         self.sent_reminders: list[dict] = []
+        self.accepts_webhooks = accepts_webhooks
         self.verify_result = True
 
     def create_invoice(self, **facts) -> str:
@@ -120,6 +134,8 @@ class MockPayPal:
 
 class SandboxPayPal:
     """PayPal Invoicing v2 over REST. It caches the access token."""
+
+    accepts_webhooks = True  # each one still passes PayPal's signature check
 
     def __init__(
         self,
@@ -221,7 +237,7 @@ class SandboxPayPal:
                 {
                     "name": description,
                     "quantity": "1",
-                    "unit_amount": {"currency_code": currency, "value": f"{amount_cents / 100:.2f}"},
+                    "unit_amount": {"currency_code": currency, "value": paypal_value(amount_cents, currency)},
                 }
             ],
         }
@@ -255,7 +271,7 @@ class SandboxPayPal:
             f"/v2/invoicing/invoices/{paypal_invoice_id}/payments",
             json={
                 "method": "BANK_TRANSFER",
-                "amount": {"currency_code": currency, "value": f"{amount_cents / 100:.2f}"},
+                "amount": {"currency_code": currency, "value": paypal_value(amount_cents, currency)},
                 "date": datetime.now(timezone.utc).date().isoformat(),
             },
         )
@@ -334,7 +350,7 @@ class ToolkitPayPal(SandboxPayPal):
                 "invoice_id": paypal_invoice_id,
                 "method": "BANK_TRANSFER",
                 "payment_date": datetime.now(timezone.utc).date().isoformat(),
-                "amount": {"currency_code": currency, "value": f"{amount_cents / 100:.2f}"},
+                "amount": {"currency_code": currency, "value": paypal_value(amount_cents, currency)},
             },
         )
 
@@ -375,4 +391,4 @@ def build_gateway(settings: Settings) -> PayPalGateway:
         return SandboxPayPal(settings)
     if settings.paypal_mode == "toolkit":
         return ToolkitPayPal(settings)
-    return MockPayPal()
+    return MockPayPal(accepts_webhooks=settings.mock_webhooks)
