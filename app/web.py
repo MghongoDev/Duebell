@@ -25,6 +25,7 @@ from app.models import User, init_db, make_engine
 from app.paypal import build_gateway
 from app.routes import auth, dashboard, invoices, reminders, risk, schedules, webhooks
 from app.routes.common import BASE_DIR
+from app.schedules import release_interrupted
 
 PUBLIC_PATHS = {"/login", "/healthz", "/webhooks/paypal"}
 ROUTERS = (auth, dashboard, invoices, risk, schedules, reminders, webhooks)
@@ -71,6 +72,8 @@ def create_app(
     settings = settings or get_settings()
     engine = engine or make_engine(settings.database_url)
     init_db(engine)
+    with Session(engine) as session:
+        release_interrupted(session)
     gateway = gateway or build_gateway(settings)
 
     @asynccontextmanager

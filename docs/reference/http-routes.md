@@ -48,7 +48,7 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 
 | Method | Path | Does |
 | --- | --- | --- |
-| `POST` | `/api/scheduled/{item_id}/approve` | Creates and sends a pending scheduled invoice. If an earlier try created the PayPal draft but failed to send it, sends that draft instead of creating another. |
+| `POST` | `/api/scheduled/{item_id}/approve` | Creates and sends a pending scheduled invoice. If an earlier try created the PayPal draft but failed to send it, sends that draft instead of creating another; if PayPal has since sent it, marks the item sent. Returns `status`, `invoice_id`, and a `warning` if PayPal did not confirm the send in time. `409` if the item is not pending or another approval holds it. `502` if PayPal fails; the item stays pending. |
 | `POST` | `/api/scheduled/{item_id}/reject` | Skips this invoice. A repeat carries on. |
 | `POST` | `/api/schedules/{schedule_id}/cancel` | Stops the schedule and cancels its upcoming and pending invoices. Sent invoices stay as they are. |
 

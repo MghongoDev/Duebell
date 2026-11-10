@@ -10,12 +10,14 @@ from datetime import timedelta
 from typing import Mapping
 from uuid import uuid4
 
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.config import Settings
 from app.models import Client, Event, Invoice, InvoiceStatus, utcnow
 from app.ownership import Scope, get_owned, owned
-from app.paypal import PayPalError, PayPalGateway
+from app.paypal import PayPalError, PayPalGateway, PayPalTimeout
 from app.risk import HistoryInvoice, RiskAssessment, score_invoice
 from app.validation import InvoiceProposal, proposal_to_cents
 
@@ -67,9 +69,30 @@ def get_or_create_client(session: Session, name: str, email: str, user_id: int |
     return client
 
 
-def next_invoice_number(session: Session) -> str:
-    count = len(session.exec(select(Invoice)).all()) + 1
-    return f"DUE-{utcnow():%Y%m%d}-{count:04d}"
+NUMBER_ATTEMPTS = 20
+SEND_UNCONFIRMED = (
+    "PayPal did not confirm the send in time and may still send it. "
+    "Duebell counts the invoice as sent so it never goes twice. Check PayPal."
+)
+
+
+def next_invoice_number(session: Session, offset: int = 0) -> str:
+    """A number above every invoice so far. The unique index settles a tie (issue #39)."""
+    highest = session.exec(select(func.max(Invoice.id))).one() or 0
+    return f"DUE-{utcnow():%Y%m%d}-{highest + 1 + offset:04d}"
+
+
+def _insert_numbered(session: Session, invoice: Invoice) -> None:
+    """Commit a new invoice, taking the next free number if another request took this one."""
+    for offset in range(NUMBER_ATTEMPTS):
+        invoice.invoice_number = next_invoice_number(session, offset)
+        session.add(invoice)
+        try:
+            session.commit()
+            return
+        except IntegrityError:
+            session.rollback()
+    raise PayPalError("Could not give the invoice a unique number. Try again.")
 
 
 def client_history(session: Session, client_id: int) -> list[HistoryInvoice]:
@@ -93,6 +116,7 @@ def create_invoice(
     gateway: PayPalGateway,
     *,
     user_id: int | None,
+    warnings: list[str] | None = None,
 ) -> Invoice:
     client = get_or_create_client(session, proposal.client_name, proposal.client_email, user_id)
     now = utcnow()
@@ -107,7 +131,7 @@ def create_invoice(
     invoice = Invoice(
         user_id=user_id,
         client_id=client.id,
-        invoice_number=next_invoice_number(session),
+        invoice_number="",
         description=proposal.description.strip(),
         amount_cents=amount_cents,
         currency=currency,
@@ -120,8 +144,7 @@ def create_invoice(
         risk_reasons="\n".join(assessment.reasons),
         limited_data=assessment.limited_data,
     )
-    session.add(invoice)
-    session.commit()
+    _insert_numbered(session, invoice)
     session.refresh(invoice)
 
     try:
@@ -144,7 +167,7 @@ def create_invoice(
     invoice.paypal_invoice_id = paypal_id
     session.add(invoice)
     session.commit()
-    return send_unsent_invoice(session, invoice, gateway)
+    return send_unsent_invoice(session, invoice, gateway, warnings=warnings)
 
 
 class InvoiceNotSent(PayPalError):
@@ -159,12 +182,21 @@ class InvoiceNotSent(PayPalError):
         self.invoice = invoice
 
 
-def send_unsent_invoice(session: Session, invoice: Invoice, gateway: PayPalGateway) -> Invoice:
-    """Send an invoice PayPal holds but has not sent. Raises InvoiceNotSent on failure."""
+def send_unsent_invoice(
+    session: Session, invoice: Invoice, gateway: PayPalGateway, *, warnings: list[str] | None = None
+) -> Invoice:
+    """Send an invoice PayPal holds but has not sent. Raises InvoiceNotSent on failure.
+
+    A timeout counts as sent, with a warning: PayPal may still act, and sending
+    again could bill the client twice (issue #39, as reminders do under ADR 0003).
+    """
     if invoice.status != InvoiceStatus.DRAFT or not invoice.paypal_invoice_id:
         raise ValueError("Only an invoice PayPal holds unsent can be sent this way.")
     try:
         gateway.send_invoice(invoice.paypal_invoice_id)
+    except PayPalTimeout:
+        if warnings is not None:
+            warnings.append(SEND_UNCONFIRMED)
     except PayPalError as exc:
         session.refresh(invoice)
         raise InvoiceNotSent(str(exc), invoice) from exc

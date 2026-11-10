@@ -144,9 +144,15 @@ def create_invoice_form(
         draft_scheduled(session, scope=current_user_id(request))
         return RedirectResponse(url="/", status_code=303)
 
+    warnings: list[str] = []
     try:
         invoice = create_invoice(
-            session, proposal, request.app.state.settings, request.app.state.gateway, user_id=current_user_id(request)
+            session,
+            proposal,
+            request.app.state.settings,
+            request.app.state.gateway,
+            user_id=current_user_id(request),
+            warnings=warnings,
         )
     except PayPalError as exc:
         return render_dashboard(
@@ -172,7 +178,7 @@ def create_invoice_form(
             cycles=schedule_request.repeat_cycles,
             first_issue=add_interval(invoice.issued_at, schedule_request.repeat, 1),
         )
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url="/?notice=send-unconfirmed" if warnings else "/", status_code=303)
 
 
 @router.post("/parse", response_class=JSONResponse)

@@ -13,10 +13,13 @@ from app.models import ReminderStatus, as_utc
 from app.reminders import reminder_rows
 from app.routes.common import TEMPLATES, current_user_id, get_session
 from app.schedules import MAX_INSTALMENTS, MIN_INSTALMENTS, schedule_rows
-from app.services import dashboard_totals, invoice_rows, list_events
+from app.services import SEND_UNCONFIRMED, dashboard_totals, invoice_rows, list_events
 from app.validation import FieldError
 
 router = APIRouter()
+
+# Notices a redirect can ask for by key. The page never shows text from the URL.
+NOTICES = {"send-unconfirmed": SEND_UNCONFIRMED}
 
 
 def _activity_rows(session: Session, user_id: int, limit: int = 20) -> list[dict]:
@@ -67,6 +70,7 @@ def render_dashboard(
             "reminders": reminder_rows(session, user_id),
             "user": request.state.user,
             "errors": errors or [],
+            "notice": NOTICES.get(request.query_params.get("notice", "")),
             "form": form or {},
             "currencies": request.app.state.settings.allowed_currencies,
             "comparison": latest_comparison(session, user_id),

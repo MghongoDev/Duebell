@@ -50,6 +50,8 @@ Toolkit calls carry no request ID, because the toolkit builds its own requests. 
 
 A repeat sends its first invoice when the user submits the form. A schedule then queues the next one. When its date comes, the scan moves it to pending. Approving it creates the invoice through the same path as the form, so it gets a risk score, reminders and history like any other.
 
+An approval claims the item before it calls PayPal, so a double click or a second tab cannot bill the client twice. If PayPal does not confirm a send in time, Duebell counts the invoice as sent and warns you to check PayPal, the same rule it applies to reminders. Sending again could bill the client twice; counting it as sent risks only an invoice you have to send by hand.
+
 Skipping one leaves the repeat running. Cancelling the schedule cancels everything upcoming or pending and leaves sent invoices alone. A schedule stays active, and can be cancelled, until its last invoice is approved or skipped.
 
 The form offers an instalment plan only when the invoice scores High. The server checks the same rule. A plan sends nothing until the user approves its first instalment.

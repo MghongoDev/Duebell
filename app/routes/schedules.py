@@ -20,13 +20,19 @@ def api_approve_scheduled(item_id: int, request: Request, session: Session = Dep
     item = get_owned(session, ScheduledInvoice, item_id, current_user_id(request))
     if item is None:
         return JSONResponse({"ok": False, "error": "Scheduled invoice not found."}, status_code=404)
+    warnings: list[str] = []
     try:
-        invoice = approve_scheduled(session, item, request.app.state.settings, request.app.state.gateway)
+        invoice = approve_scheduled(
+            session, item, request.app.state.settings, request.app.state.gateway, warnings=warnings
+        )
     except ValueError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
     except PayPalError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
-    return {"ok": True, "status": item.status, "invoice_id": invoice.id}
+    body = {"ok": True, "status": item.status, "invoice_id": invoice.id}
+    if warnings:
+        body["warning"] = " ".join(warnings)
+    return body
 
 
 @router.post("/api/scheduled/{item_id}/reject", response_class=JSONResponse)
