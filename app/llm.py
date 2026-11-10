@@ -186,17 +186,41 @@ def _call_model(text: str, settings: Settings) -> dict:
     if response.status_code >= 400:
         raise LLMError(f"The AI service returned {response.status_code}. Fill the form instead.")
 
-    data = response.json()
+    return extract_json(_reply_text(response))
+
+
+UNREADABLE_REPLY = "The AI service sent a reply duebell could not read. Try again or fill the form."
+
+
+def _reply_text(response: httpx.Response) -> str:
+    """Return the text of a model reply, or raise LLMError (issue #83).
+
+    A proxy can answer 200 with an HTML error page, or an endpoint can send
+    JSON of the wrong shape. Any body that is not a JSON object holding text
+    content gives one plain message. The body itself is never echoed.
+    """
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise LLMError(UNREADABLE_REPLY) from exc
+    if not isinstance(data, dict):
+        raise LLMError(UNREADABLE_REPLY)
     if isinstance(data.get("content"), list):
-        text_out = "".join(
-            block.get("text", "")
+        texts = [
+            block.get("text")
             for block in data["content"]
             if isinstance(block, dict) and block.get("type") == "text"
-        )
-    else:
-        choices = data.get("choices") or [{}]
-        text_out = choices[0].get("message", {}).get("content", "")
-    return extract_json(text_out)
+        ]
+        if not all(isinstance(text, str) for text in texts):
+            raise LLMError(UNREADABLE_REPLY)
+        return "".join(texts)
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise LLMError(UNREADABLE_REPLY)
+    message = choices[0].get("message")
+    if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+        raise LLMError(UNREADABLE_REPLY)
+    return message["content"]
 
 
 def _mock_parse(text: str, settings: Settings) -> AIDraft:
