@@ -13,11 +13,15 @@ The reason is cost. A wrong reminder can damage a client relationship, and a wro
 | A repeat's next invoice | The scan, when its date comes | `Approve and send` |
 | An instalment | The plan, when its date comes | `Approve and send` |
 
-The scan runs every 30 minutes and on `Scan now`. It drafts a reminder for a sent invoice that is overdue, or due within the reminder window and scored Medium or High. It skips invoices with no PayPal ID, because a draft for them could never be sent. It also skips invoices that already have a pending or sent reminder.
+The scan runs every 30 minutes and on `Scan now`. It drafts a reminder for a sent invoice that is overdue, or due within the reminder window and scored Medium or High. It skips invoices with no PayPal ID, because a draft for them could never be sent. It also skips invoices that already have a pending, sending or sent reminder.
 
 The scheduler and `Scan now` can run at the same moment. Each still acts once. A scan claims a due scheduled invoice with one conditional update before it queues the next one, so a repeat never gains an extra invoice. The database allows one pending reminder per invoice, so a second scan's draft is refused and skipped.
 
 Once an invoice is paid, cancelled or refunded, its pending drafts are rejected: by the webhook or refresh that closes it, by a simulated payment, and by the next scan. Approving a draft for a closed invoice is refused and rejects the draft, so a client never gets a reminder for an invoice they have paid.
+
+Approving a reminder claims the draft before anything is sent, the same way a scheduled invoice is claimed. A double click or a second tab gets a `409`, so the client gets one reminder. If a channel fails, the claim is released and the draft is pending again.
+
+Two copies of one PayPal webhook can arrive at the same moment. The webhook stores the event before it reads the invoice. The second copy waits for the first, finds the event ID taken, and counts as a duplicate. An event for the same invoice also waits, so the forward-only rule always compares against the latest status.
 
 ## Channels
 

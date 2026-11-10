@@ -41,7 +41,7 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 | `POST` | `/api/reminders/scan` | Drafts reminders and moves due scheduled invoices to pending. Sends nothing. Returns `{"created": n, "scheduled": m}`. |
 | `GET` | `/api/reminders` | The user's reminders, newest first. |
 | `POST` | `/api/reminders/{reminder_id}/edit` | Field `draft_text`. Saves a new draft. `409` unless the draft is pending. |
-| `POST` | `/api/reminders/{reminder_id}/approve` | Field `channel`: `paypal` (the default), `email` or `both`. Sends through each channel not yet used. Returns `status`, `sent_channels`, and a `warning` if PayPal did not confirm in time. `409` if the draft is not pending or the invoice has no PayPal ID. `409` too if the invoice is paid, cancelled or refunded; the draft is then marked `REJECTED`. `502` if a channel fails; the draft stays pending. |
+| `POST` | `/api/reminders/{reminder_id}/approve` | Field `channel`: `paypal` (the default), `email` or `both`. Sends through each channel not yet used. Returns `status`, `sent_channels`, and a `warning` if PayPal did not confirm in time. `409` if the draft is not pending, another approval holds it, or the invoice has no PayPal ID. `409` too if the invoice is paid, cancelled or refunded; the draft is then marked `REJECTED`. `502` if a channel fails; the draft stays pending. |
 | `POST` | `/api/reminders/{reminder_id}/reject` | Marks the draft `REJECTED`. A later scan may draft a new one. |
 
 ## Scheduled invoices
@@ -58,6 +58,6 @@ In `mock` mode the webhook returns `401` with `{"ok": false, "error": "webhooks 
 
 | Method | Path | Does |
 | --- | --- | --- |
-| `POST` | `/webhooks/paypal` | Public. Checks the signature through PayPal before anything else. Stores each event once by its PayPal event ID, so a replay changes nothing. `400` for a bad signature, a body that is not UTF-8, invalid JSON or a missing event ID. `413` above 1 MB. |
+| `POST` | `/webhooks/paypal` | Public. Checks the signature through PayPal before anything else. Stores each event once by its PayPal event ID, so a replay changes nothing, even one that arrives while the first copy is still being handled. `400` for a bad signature, a body that is not UTF-8, invalid JSON or a missing event ID. `413` above 1 MB. |
 
 The webhook maps these PayPal events to invoice statuses: `INVOICING.INVOICE.SENT`, `.PAID`, `.CANCELLED` and `.REFUNDED`. The event belongs to the user who owns the invoice. Duebell still stores an event that would move the invoice backward, such as `SENT` after `PAID`, but the event changes nothing and returns `"applied": false`.

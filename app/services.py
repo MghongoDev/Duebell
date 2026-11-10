@@ -400,6 +400,19 @@ def handle_webhook(session: Session, gateway, headers: Mapping[str, str], body: 
     if existing:
         return {"ok": True, "duplicate": True}
 
+    # Store the event before reading the invoice (issue #48). The insert takes
+    # SQLite's write lock, so a copy of this event arriving at the same moment
+    # waits, then fails on the primary key and counts as a duplicate. Another
+    # event for the same invoice also waits, so may_replace below always sees
+    # the status the last event left.
+    event = Event(paypal_event_id=event_id, event_type=event_type, payload=body[:20000])
+    session.add(event)
+    try:
+        session.flush()
+    except IntegrityError:
+        session.rollback()
+        return {"ok": True, "duplicate": True}
+
     resource = payload.get("resource") or {}
     paypal_invoice_id = resource.get("id") or (resource.get("invoice") or {}).get("id") or ""
     status = EVENT_STATUS.get(event_type)
@@ -414,14 +427,8 @@ def handle_webhook(session: Session, gateway, headers: Mapping[str, str], body: 
         reject_drafts_if_closed(session, invoice)
         applied = True
 
-    session.add(
-        Event(
-            paypal_event_id=event_id,
-            user_id=owner_id,
-            event_type=event_type,
-            payload=body[:20000],
-        )
-    )
+    event.user_id = owner_id
+    session.add(event)
     session.commit()
     return {"ok": True, "applied": applied, "status": status}
 

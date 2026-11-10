@@ -13,16 +13,30 @@ from app.services import handle_webhook
 router = APIRouter()
 
 
-@router.post("/webhooks/paypal", response_class=JSONResponse)
-async def paypal_webhook(request: Request, session: Session = Depends(get_session)):
+async def raw_body(request: Request) -> bytes | None:
+    """The request body, or None if it is over the size limit.
+
+    Reading the body is the only async step. The route itself is a plain def,
+    so the signature check and the database work run in FastAPI's threadpool,
+    off the event loop (issue #48).
+    """
     try:
         declared = int(request.headers.get("content-length", "0") or 0)
     except ValueError:
         declared = 0
     if declared > MAX_WEBHOOK_BYTES:
-        return JSONResponse({"ok": False, "error": "payload too large"}, status_code=413)
+        return None
     raw = await request.body()
-    if len(raw) > MAX_WEBHOOK_BYTES:
+    return None if len(raw) > MAX_WEBHOOK_BYTES else raw
+
+
+@router.post("/webhooks/paypal", response_class=JSONResponse)
+def paypal_webhook(
+    request: Request,
+    raw: bytes | None = Depends(raw_body),
+    session: Session = Depends(get_session),
+):
+    if raw is None:
         return JSONResponse({"ok": False, "error": "payload too large"}, status_code=413)
     try:
         body = raw.decode("utf-8")

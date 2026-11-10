@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select
+from sqlmodel import Session, select, update
 
 from app.config import Settings
 from app.mailer import Mailer
@@ -24,7 +24,7 @@ from app.risk import RiskLevel
 from app.services import CLOSED_STATUSES, money, reject_drafts_if_closed
 
 REMINDABLE_STATUSES = {InvoiceStatus.SENT, InvoiceStatus.OVERDUE}
-BLOCKING_REMINDER_STATUSES = {ReminderStatus.PENDING, ReminderStatus.SENT}
+BLOCKING_REMINDER_STATUSES = {ReminderStatus.PENDING, ReminderStatus.SENDING, ReminderStatus.SENT}
 MAX_DRAFT_CHARS = 2_000
 
 
@@ -189,9 +189,11 @@ def send_reminder(
 ) -> SendOutcome:
     """Send an approved draft. This is the only path out of the app (ADR 0003).
 
+    The draft is claimed before anything is sent, so a double click or a
+    second tab gets a ValueError instead of a second reminder (issue #48).
     Each channel is recorded as soon as it succeeds. If a later channel fails,
-    the draft stays pending and a retry skips the channels already done, so
-    PayPal never sends the same reminder twice.
+    the claim is released, the draft is pending again, and a retry skips the
+    channels already done, so PayPal never sends the same reminder twice.
     """
     if reminder.status != ReminderStatus.PENDING:
         raise ValueError("Only a pending draft can be sent.")
@@ -230,18 +232,24 @@ def send_reminder(
         mailer.send(client.email, subject, reminder.draft_text)
 
     senders = {Channel.PAYPAL: via_paypal, Channel.EMAIL: via_email}
-    done = sent_channels(reminder)
-    for channel in channels:
-        if channel in done:
-            continue
-        senders[channel]()
-        done.append(channel)
-        reminder.sent_channels = ",".join(channel.value for channel in CHANNELS if channel in done)
-        # When a channel last delivered. The status says whether every chosen
-        # channel has, so a partly sent draft still shows in the activity feed.
-        reminder.sent_at = utcnow()
-        session.add(reminder)
-        session.commit()
+    if not _claim(session, reminder):
+        raise ValueError("This reminder is already being sent.")
+    try:
+        done = sent_channels(reminder)
+        for channel in channels:
+            if channel in done:
+                continue
+            senders[channel]()
+            done.append(channel)
+            reminder.sent_channels = ",".join(channel.value for channel in CHANNELS if channel in done)
+            # When a channel last delivered. The status says whether every chosen
+            # channel has, so a partly sent draft still shows in the activity feed.
+            reminder.sent_at = utcnow()
+            session.add(reminder)
+            session.commit()
+    except Exception:
+        _release(session, reminder)
+        raise
 
     reminder.status = ReminderStatus.SENT
     reminder.sent_at = utcnow()
@@ -249,6 +257,39 @@ def send_reminder(
     session.commit()
     session.refresh(reminder)
     return SendOutcome(reminder, warnings)
+
+
+def _claim(session: Session, reminder: Reminder) -> bool:
+    """Move PENDING to SENDING in one conditional update. Only one approval wins."""
+    result = session.exec(
+        update(Reminder)
+        .where(Reminder.id == reminder.id, Reminder.status == ReminderStatus.PENDING)
+        .values(status=ReminderStatus.SENDING)
+    )
+    session.commit()
+    session.refresh(reminder)
+    return result.rowcount == 1
+
+
+def _release(session: Session, reminder: Reminder) -> None:
+    """Put a claimed draft back to PENDING. Channels already recorded stay recorded."""
+    session.rollback()
+    session.refresh(reminder)
+    reminder.status = ReminderStatus.PENDING
+    session.add(reminder)
+    session.commit()
+
+
+def release_interrupted_reminders(session: Session) -> int:
+    """Return drafts a stopped process left SENDING to PENDING. Run at startup.
+
+    A retry skips the channels already recorded in sent_channels (issue #48).
+    """
+    result = session.exec(
+        update(Reminder).where(Reminder.status == ReminderStatus.SENDING).values(status=ReminderStatus.PENDING)
+    )
+    session.commit()
+    return result.rowcount
 
 
 def edit_reminder(session: Session, reminder: Reminder, text: str) -> Reminder:
