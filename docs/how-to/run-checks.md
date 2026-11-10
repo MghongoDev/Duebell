@@ -1,6 +1,6 @@
 # Run the checks
 
-GitHub Actions runs these on every push and pull request, in mock mode. Run them yourself before you push, so a red check never reaches the branch. None needs credentials or a network.
+GitHub Actions runs these on every push and pull request, in mock mode, once on Python 3.12 and once on Python 3.15. 3.12 is the oldest version Duebell supports and the one Render runs; 3.15 is the newest the lock installs on. Run them yourself before you push, so a red check never reaches the branch. None needs credentials or a network.
 
 ```bash
 .venv/bin/pip install -r requirements.txt -r requirements-dev.txt
@@ -28,7 +28,7 @@ uv pip compile requirements.in --universal --python-version 3.12 -o requirements
 uv pip compile requirements-dev.in --universal --python-version 3.12 -o requirements-dev.txt
 ```
 
-The lock targets Python 3.12, the version Render and CI run. To move every package to its newest allowed version, add `--upgrade` to both commands. Run the checks above before you commit the new locks.
+The lock targets Python 3.12, the version Render runs. CI also installs it on Python 3.15, where `pyyaml` has no wheel yet and builds from source. To move every package to its newest allowed version, add `--upgrade` to both commands. Run the checks above before you commit the new locks.
 
 ## Compare models on synthetic data
 

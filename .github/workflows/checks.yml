@@ -1,5 +1,7 @@
 # The project's checks on every push and pull request (issue #28).
 # Everything runs in mock mode: no secrets, no PayPal, no model, no email.
+# The same checks run on 3.12, the oldest supported Python and the one Render
+# uses, and on 3.15, the newest the lock installs on (issue #105).
 name: Checks
 
 on:
@@ -11,7 +13,13 @@ permissions:
 
 jobs:
   checks:
+    name: checks (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      # One version failing must not cancel the other and hide its result.
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.15"]
     timeout-minutes: 15
     env:
       PAYPAL_MODE: mock
@@ -22,7 +30,9 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
+          # setup-python keys the pip cache on the OS, the Python version and
+          # the hash of the files below, so each version keeps its own cache.
           cache: pip
           cache-dependency-path: |
             requirements.txt
