@@ -174,6 +174,53 @@ def create_recurring(
     return schedule
 
 
+def repeat_invoice(session: Session, invoice: Invoice, unit: str, cycles: int | None) -> Schedule:
+    """Repeat a sent invoice: the next one falls one interval after its issue date."""
+    basis = ScheduleBasis(
+        user_id=invoice.user_id,
+        client_id=invoice.client_id,
+        description=invoice.description,
+        amount_cents=invoice.amount_cents,
+        currency=invoice.currency,
+        terms_days=invoice.terms_days,
+    )
+    return create_recurring(
+        session, basis, interval_unit=unit, cycles=cycles, first_issue=add_interval(invoice.issued_at, unit, 1)
+    )
+
+
+def hold_repeat(session: Session, invoice: Invoice, unit: str, cycles: int | None) -> None:
+    """Keep a Repeat ticked on the form until the invoice is sent (issue #41)."""
+    invoice.repeat_unit = unit
+    invoice.repeat_cycles = cycles
+    session.add(invoice)
+    session.commit()
+
+
+def send_draft(
+    session: Session, invoice: Invoice, gateway: PayPalGateway, *, warnings: list[str] | None = None
+) -> Invoice:
+    """Send a draft PayPal holds but has not sent, then start its held repeat (issue #41).
+
+    The send reuses the PayPal invoice, so it never creates a second one.
+    Raises ValueError if the invoice is not such a draft, InvoiceNotSent if
+    PayPal refuses. The held repeat is cleared in the same commit that creates
+    the schedule, so two sends at once start one schedule.
+    """
+    invoice = send_unsent_invoice(session, invoice, gateway, warnings=warnings)
+    unit, cycles = invoice.repeat_unit, invoice.repeat_cycles
+    if unit:
+        claimed = session.exec(
+            update(Invoice)
+            .where(Invoice.id == invoice.id, Invoice.repeat_unit.is_not(None))
+            .values(repeat_unit=None, repeat_cycles=None)
+        )
+        if claimed.rowcount == 1:
+            repeat_invoice(session, invoice, unit, cycles)
+        session.refresh(invoice)
+    return invoice
+
+
 def create_plan(
     session: Session,
     basis: ScheduleBasis,

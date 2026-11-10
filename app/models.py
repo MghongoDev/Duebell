@@ -1,4 +1,4 @@
-"""Database models and engine setup for Duebell (issues #9, #22, #24, #25, #26, #31, #40).
+"""Database models and engine setup for Duebell (issues #9, #22, #24, #25, #26, #31, #40, #41).
 
 Every table that holds a user's data has a user_id (ADR 0008). init_db adds
 columns and indexes a newer model declares to an older database, so a demo
@@ -142,6 +142,11 @@ class Invoice(SQLModel, table=True):
     risk_level: Optional[str] = None
     risk_reasons: str = ""
     limited_data: bool = False
+    # A Repeat ticked on the form when the send failed. The first send through
+    # POST /api/invoices/{id}/send turns it into a schedule and clears it
+    # (issue #41). repeat_cycles None with a repeat_unit repeats until cancelled.
+    repeat_unit: Optional[str] = None
+    repeat_cycles: Optional[int] = None
     created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
 
 
