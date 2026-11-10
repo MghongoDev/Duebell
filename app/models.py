@@ -1,4 +1,4 @@
-"""Database models and engine setup for Duebell (issues #9, #22, #24, #25, #26, #31).
+"""Database models and engine setup for Duebell (issues #9, #22, #24, #25, #26, #31, #40).
 
 Every table that holds a user's data has a user_id (ADR 0008). init_db adds
 columns and indexes a newer model declares to an older database, so a demo
@@ -7,15 +7,18 @@ database keeps working across builds.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Optional
 
 from sqlalchemy import DateTime, Index, inspect, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Field, SQLModel, create_engine
 
+log = logging.getLogger("duebell.models")
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -143,6 +146,11 @@ class Invoice(SQLModel, table=True):
 
 
 class Reminder(SQLModel, table=True):
+    # One pending draft per invoice, even if two scans run at once (issue #40).
+    __table_args__ = (
+        Index("ux_reminder_pending_invoice", "invoice_id", unique=True, sqlite_where=text("status = 'PENDING'")),
+    )
+
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
     invoice_id: int = Field(foreign_key="invoice.id", index=True)
@@ -190,6 +198,9 @@ class Schedule(SQLModel, table=True):
 
 class ScheduledInvoice(SQLModel, table=True):
     """One future invoice. UPCOMING, then PENDING approval, then SENT."""
+
+    # One item per place in a schedule, even if two scans run at once (issue #40).
+    __table_args__ = (Index("ux_scheduledinvoice_schedule_sequence", "schedule_id", "sequence", unique=True),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
@@ -241,20 +252,33 @@ def sync_indexes(engine) -> None:
 
     Issue #24 made client email unique per user instead of globally, so an
     older database must lose its global unique index on client.email.
+
+    A unique index cannot be built over rows that already break it, such as
+    two pending drafts for one invoice left by the race issue #40 closes. The
+    rows are left alone, a warning names the index, and the next startup tries
+    again. Startup never fails on it.
     """
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
-    with engine.begin() as connection:
-        for table in SQLModel.metadata.sorted_tables:
-            if table.name not in existing_tables:
+    for table in SQLModel.metadata.sorted_tables:
+        if table.name not in existing_tables:
+            continue
+        present = {index["name"]: bool(index["unique"]) for index in inspector.get_indexes(table.name)}
+        for index in table.indexes:
+            if index.name in present and present[index.name] == bool(index.unique):
                 continue
-            present = {index["name"]: bool(index["unique"]) for index in inspector.get_indexes(table.name)}
-            for index in table.indexes:
-                if index.name in present and present[index.name] != bool(index.unique):
-                    connection.execute(text(f'DROP INDEX "{index.name}"'))
-                    present.pop(index.name)
-                if index.name not in present:
+            try:
+                with engine.begin() as connection:
+                    if index.name in present:
+                        connection.execute(text(f'DROP INDEX "{index.name}"'))
                     index.create(connection)
+            except IntegrityError:
+                log.warning(
+                    "Could not add unique index %s: table %s already holds rows that break it. "
+                    "Resolve them and restart. See docs/how-to/troubleshoot.md.",
+                    index.name,
+                    table.name,
+                )
 
 
 def add_missing_columns(engine) -> None:

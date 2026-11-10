@@ -1,4 +1,4 @@
-"""Reminder drafting, editing, approval, and rejection (issues #15, #24, #26; ADR 0003).
+"""Reminder drafting, editing, approval, and rejection (issues #15, #24, #26, #40; ADR 0003).
 
 Scanning only creates drafts. A human must edit or approve a draft before
 Duebell asks PayPal to send a reminder. The draft uses only facts already on
@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.config import Settings
@@ -106,6 +107,12 @@ def draft_reminders(
     *,
     scope: Scope,
 ) -> list[Reminder]:
+    """Draft one reminder for each invoice that needs one. Nothing is sent here.
+
+    Each draft is committed on its own. If another scan drafted one for the
+    same invoice first, the database refuses a second pending draft and this
+    scan skips that invoice (issue #40).
+    """
     closed = owned(select(Invoice).where(Invoice.status.in_(CLOSED_STATUSES)), Invoice, scope)
     if sum(reject_drafts_if_closed(session, invoice) for invoice in session.exec(closed).all()):
         session.commit()
@@ -130,11 +137,13 @@ def draft_reminders(
             status=ReminderStatus.PENDING,
         )
         session.add(reminder)
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            continue
+        session.refresh(reminder)
         created.append(reminder)
-    if created:
-        session.commit()
-        for reminder in created:
-            session.refresh(reminder)
     return created
 
 
