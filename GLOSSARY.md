@@ -61,7 +61,7 @@ A message that asks a client to pay an unpaid invoice. Duebell drafts it; a huma
 _Avoid_: Nudge, follow-up, chase
 
 **Stage**:
-Where an invoice stood when its reminder was drafted: before due, or overdue once it is a full day past its due date. An invoice gets at most one sent reminder in each stage. Stage is separate from tone: a High-risk invoice's before-due reminder is already firm.
+Where an invoice stood when its reminder was drafted: before due, or overdue once it is a full day past its due date. An invoice gets at most one sent reminder in each stage. A reminder counts as sent in its stage once any channel has delivered it, whatever its status, so a draft PayPal sent and the user then rejected still counts. A rejected draft that no channel delivered counts for nothing. Stage is separate from tone: a High-risk invoice's before-due reminder is already firm.
 _Avoid_: Phase, round, reminder level
 
 **Scan**:
