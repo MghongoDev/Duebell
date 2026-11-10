@@ -13,13 +13,17 @@ The reason is cost. A wrong reminder can damage a client relationship, and a wro
 | A repeat's next invoice | The scan, when its date comes | `Approve and send` |
 | An instalment | The plan, when its date comes | `Approve and send` |
 
-The scan runs every 30 minutes and on `Scan now`. It drafts a reminder for a sent invoice that is overdue, or due within the reminder window and scored Medium or High. It skips invoices with no PayPal ID, because a draft for them could never be sent. An invoice can get two reminders: one before it is due and one once it is overdue. Each reminder records its [stage](../../GLOSSARY.md) when the scan drafts it: overdue once the invoice is a full day past its due date, before due until then. The scan skips an invoice that has a pending draft, whatever its stage, and an invoice that already has a sent reminder in the stage it would draft now. A rejected draft blocks nothing. So a Medium-risk invoice that got its friendly reminder still gets an overdue draft once it is late, and never a second reminder in either stage.
+The scan runs every 30 minutes and on `Scan now`. It drafts a reminder for a sent invoice that is overdue, or due within the reminder window and scored Medium or High. It skips invoices with no PayPal ID, because a draft for them could never be sent. An invoice can get two reminders: one before it is due and one once it is overdue. Each reminder records its [stage](../../GLOSSARY.md) when the scan drafts it: overdue once the invoice is a full day past its due date, before due until then. The scan skips an invoice that has a pending draft or one being sent, whatever its stage, and an invoice that already has a sent reminder in the stage it would draft now. A rejected draft blocks nothing. So a Medium-risk invoice that got its friendly reminder still gets an overdue draft once it is late, and never a second reminder in either stage.
 
 A reminder from a build that did not record stages counts as overdue if it was drafted a full day past the due date, and as before due otherwise.
 
 The scheduler and `Scan now` can run at the same moment. Each still acts once. A scan claims a due scheduled invoice with one conditional update before it queues the next one, so a repeat never gains an extra invoice. The database allows one pending reminder per invoice, so a second scan's draft is refused and skipped.
 
 Once an invoice is paid, cancelled or refunded, its pending drafts are rejected: by the webhook or refresh that closes it, by a simulated payment, and by the next scan. Approving a draft for a closed invoice is refused and rejects the draft, so a client never gets a reminder for an invoice they have paid.
+
+Approving a reminder claims the draft before anything is sent, the same way a scheduled invoice is claimed. A double click or a second tab gets a `409`, so the client gets one reminder. If a channel fails, the claim is released and the draft is pending again.
+
+Two copies of one PayPal webhook can arrive at the same moment. The webhook stores the event before it reads the invoice. The second copy waits for the first, finds the event ID taken, and counts as a duplicate. An event for the same invoice also waits, so the forward-only rule always compares against the latest status.
 
 ## Channels
 

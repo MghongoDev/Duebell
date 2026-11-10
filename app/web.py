@@ -15,6 +15,7 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.auth import COOKIE_NAME, Lockout, read_session_cookie
 from app.config import Settings, get_settings
@@ -23,6 +24,7 @@ from app.llm import build_parser
 from app.mailer import build_mailer
 from app.models import User, init_db, make_engine
 from app.paypal import build_gateway
+from app.reminders import release_interrupted_reminders
 from app.routes import auth, dashboard, invoices, reminders, risk, schedules, webhooks
 from app.routes.common import BASE_DIR
 from app.schedules import release_interrupted
@@ -61,6 +63,14 @@ def _add_routes(app: FastAPI, router: APIRouter) -> None:
         )
 
 
+def _load_user(engine, user_id: int) -> User | None:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if user is not None:
+            session.expunge(user)
+        return user
+
+
 def create_app(
     settings: Settings | None = None,
     engine=None,
@@ -74,6 +84,7 @@ def create_app(
     init_db(engine)
     with Session(engine) as session:
         release_interrupted(session)
+        release_interrupted_reminders(session)
     gateway = gateway or build_gateway(settings)
 
     @asynccontextmanager
@@ -105,10 +116,8 @@ def create_app(
         user_id = read_session_cookie(request.app.state.secret_key, request.cookies.get(COOKIE_NAME))
         user = None
         if user_id is not None:
-            with Session(request.app.state.engine) as session:
-                user = session.get(User, user_id)
-                if user is not None:
-                    session.expunge(user)
+            # The database read runs in the threadpool, off the event loop (issue #48).
+            user = await run_in_threadpool(_load_user, request.app.state.engine, user_id)
         if user is None:
             if request.method == "GET" and not path.startswith("/api/"):
                 return RedirectResponse(url="/login", status_code=303)

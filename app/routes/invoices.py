@@ -181,9 +181,10 @@ def create_invoice_form(
 
 
 @router.post("/parse", response_class=JSONResponse)
-async def parse_description(request: Request):
-    form = await request.form()
-    text = str(form.get("description", "")).strip()
+def parse_description(request: Request, description: str = Form("")):
+    # A plain def runs in FastAPI's threadpool, so a slow model call does not
+    # hold up other requests (issue #48).
+    text = description.strip()
     if not text:
         return JSONResponse({"ok": False, "error": "Write a sentence or two first."}, status_code=422)
     if len(text) > MAX_PROMPT_CHARS:

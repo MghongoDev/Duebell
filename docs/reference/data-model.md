@@ -54,8 +54,11 @@ A status only moves forward. A webhook or refresh never moves an invoice out of 
 | Status | Meaning |
 | --- | --- |
 | `PENDING` | A draft waiting for approval. `sent_channels` may already list a channel if a later one failed. |
+| `SENDING` | One approval has claimed it and is sending. A second approval gets a `409`. |
 | `SENT` | Every chosen channel delivered it. |
 | `REJECTED` | Dropped without sending. A later scan may draft a new one. |
+
+Approval claims the draft by moving it from `PENDING` to `SENDING` in one conditional update. A failed channel puts it back to `PENDING`, and so does a restart that finds it `SENDING`. A scan drafts nothing for an invoice whose reminder is `SENDING`.
 
 `sent_channels` lists the channels that delivered the reminder, for example `paypal,email`. A retry skips them. `sent_at` is when a channel last delivered.
 
