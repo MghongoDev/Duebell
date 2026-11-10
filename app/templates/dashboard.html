@@ -195,6 +195,9 @@
         <button class="ghost small" data-reminder-action="reject" data-id="{{ reminder.id }}">Reject draft</button>
       </div>
       {% else %}
+      {% if reminder.status == ReminderStatus.REJECTED and reminder.sent_channels %}
+      <p class="hint">Sent via {{ reminder.sent_channels|map(attribute='label')|join(' and ') }} before the rest was rejected.</p>
+      {% endif %}
       <pre class="draft">{{ reminder.draft_text }}</pre>
       {% endif %}
     </li>

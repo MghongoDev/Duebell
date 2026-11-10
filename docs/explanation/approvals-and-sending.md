@@ -13,7 +13,7 @@ The reason is cost. A wrong reminder can damage a client relationship, and a wro
 | A repeat's next invoice | The scan, when its date comes | `Approve and send` |
 | An instalment | The plan, when its date comes | `Approve and send` |
 
-The scan runs every 30 minutes and on `Scan now`. It drafts a reminder for a sent invoice that is overdue, or due within the reminder window and scored Medium or High. It skips invoices with no PayPal ID, because a draft for them could never be sent. An invoice can get two reminders: one before it is due and one once it is overdue. Each reminder records its [stage](../../GLOSSARY.md) when the scan drafts it: overdue once the invoice is a full day past its due date, before due until then. The scan skips an invoice that has a pending draft or one being sent, whatever its stage, and an invoice that already has a sent reminder in the stage it would draft now. A rejected draft blocks nothing. So a Medium-risk invoice that got its friendly reminder still gets an overdue draft once it is late, and never a second reminder in either stage.
+The scan runs every 30 minutes and on `Scan now`. It drafts a reminder for a sent invoice that is overdue, or due within the reminder window and scored Medium or High. It skips invoices with no PayPal ID, because a draft for them could never be sent. An invoice can get two reminders: one before it is due and one once it is overdue. Each reminder records its [stage](../../GLOSSARY.md) when the scan drafts it: overdue once the invoice is a full day past its due date, before due until then. The scan skips an invoice that has a pending draft or one being sent, whatever its stage, and an invoice that already has a sent reminder in the stage it would draft now. A reminder counts as sent once any channel has delivered it, whatever its status. So if PayPal sends a reminder, email fails, and the user rejects the rest, the scan drafts nothing more in that stage. A rejected draft that no channel delivered blocks nothing. So a Medium-risk invoice that got its friendly reminder still gets an overdue draft once it is late, and never a second reminder in either stage.
 
 A reminder from a build that did not record stages counts as overdue if it was drafted a full day past the due date, and as before due otherwise.
 
@@ -29,7 +29,7 @@ Two copies of one PayPal webhook can arrive at the same moment. The webhook stor
 
 When approving a reminder, the user picks a [channel](../../GLOSSARY.md): PayPal, email, or both. PayPal goes first.
 
-Duebell records each channel the moment it succeeds. If email then fails, the reminder stays pending with an error, and approving it again sends only the email. PayPal never sends the same reminder twice. The activity feed lists a reminder once any channel has delivered it, even if the rest of the draft is later rejected.
+Duebell records each channel the moment it succeeds. If email then fails, the reminder stays pending with an error, and approving it again sends only the email. PayPal never sends the same reminder twice. The activity feed lists a reminder once any channel has delivered it, even if the rest of the draft is later rejected. Such a rejected reminder's row names the channels that sent it, and it still counts as sent in its stage.
 
 ## Never sending twice
 
