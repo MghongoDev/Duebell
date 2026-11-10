@@ -1,4 +1,4 @@
-"""Invoice services for Duebell (issues #9, #11, #23, #24, #46). See ADRs 0005 and 0008.
+"""Invoice services for Duebell (issues #9, #11, #23, #24, #46, #74). See ADRs 0005 and 0008.
 
 Every read takes an ownership scope (app.ownership); creation records an owner.
 """
@@ -130,15 +130,12 @@ def client_history(session: Session, client_id: int, now: datetime | None = None
     return history_as_of(list(invoices), as_utc(now or utcnow()))
 
 
-def create_invoice(
-    session: Session,
-    proposal: InvoiceProposal,
-    settings: Settings,
-    gateway: PayPalGateway,
-    *,
-    user_id: int | None,
-    warnings: list[str] | None = None,
-) -> Invoice:
+def draft_invoice(session: Session, proposal: InvoiceProposal, *, user_id: int | None) -> Invoice:
+    """Save a numbered, risk-scored DRAFT and commit it. Calls nothing outside (issue #74).
+
+    The caller can link the committed row before calling PayPal, as
+    approve_scheduled does, so a retry finds the invoice it already made.
+    """
     client = get_or_create_client(session, proposal.client_name, proposal.client_email, user_id)
     now = utcnow()
     currency = proposal.currency.strip().upper()
@@ -169,28 +166,65 @@ def create_invoice(
     )
     _insert_numbered(session, invoice)
     session.refresh(invoice)
+    return invoice
 
-    try:
-        paypal_id = gateway.create_invoice(
-            invoice_number=invoice.invoice_number,
-            amount_cents=invoice.amount_cents,
-            currency=invoice.currency,
-            description=invoice.description,
-            terms_days=invoice.terms_days,
-            client_name=client.name,
-            client_email=client.email,
-            issued_at=invoice.issued_at,
-            due_at=invoice.due_at,
-        )
-    except PayPalError:
-        session.delete(invoice)
-        session.commit()
-        raise
 
+def publish_invoice(
+    session: Session, invoice: Invoice, gateway: PayPalGateway, *, warnings: list[str] | None = None
+) -> Invoice:
+    """Create a saved DRAFT in PayPal, commit its PayPal ID, then send it (issue #74).
+
+    The invoice takes its dates when PayPal creates it, so a draft saved before
+    a restart does not go out with old dates. The send starts only once the
+    PayPal ID is committed. Raises PayPalError if PayPal refuses to create it,
+    leaving the row as it was, and InvoiceNotSent if the send fails.
+    """
+    if invoice.status != InvoiceStatus.DRAFT or invoice.paypal_invoice_id:
+        raise ValueError("Only a saved draft PayPal does not hold yet can be created there.")
+    client = session.get(Client, invoice.client_id)
+    now = utcnow()
+    due_at = now + timedelta(days=invoice.terms_days)
+    paypal_id = gateway.create_invoice(
+        invoice_number=invoice.invoice_number,
+        amount_cents=invoice.amount_cents,
+        currency=invoice.currency,
+        description=invoice.description,
+        terms_days=invoice.terms_days,
+        client_name=client.name,
+        client_email=client.email,
+        issued_at=now,
+        due_at=due_at,
+    )
+    invoice.issued_at = now
+    invoice.due_at = due_at
     invoice.paypal_invoice_id = paypal_id
     session.add(invoice)
     session.commit()
     return send_unsent_invoice(session, invoice, gateway, warnings=warnings)
+
+
+def create_invoice(
+    session: Session,
+    proposal: InvoiceProposal,
+    settings: Settings,
+    gateway: PayPalGateway,
+    *,
+    user_id: int | None,
+    warnings: list[str] | None = None,
+) -> Invoice:
+    """Save the draft, then create and send it in PayPal. The form's path.
+
+    If PayPal refuses to create it, the draft is deleted and the error raised.
+    """
+    invoice = draft_invoice(session, proposal, user_id=user_id)
+    try:
+        return publish_invoice(session, invoice, gateway, warnings=warnings)
+    except InvoiceNotSent:
+        raise
+    except PayPalError:
+        session.delete(invoice)
+        session.commit()
+        raise
 
 
 class InvoiceNotSent(PayPalError):
