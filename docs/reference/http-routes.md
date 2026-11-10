@@ -12,7 +12,7 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 | --- | --- | --- |
 | `GET` | `/healthz` | Returns `{"ok": true, "service": "duebell"}`. It does not query the database or PayPal. |
 | `GET` | `/login` | The sign-in page. |
-| `POST` | `/login` | Fields `email`, `password`. Sets the session cookie and redirects to `/`. A wrong password, or a locked email, returns `401` with the page. An `Origin` header naming another host returns `403`. |
+| `POST` | `/login` | Fields `email`, `password`. Sets the session cookie and redirects to `/`. A wrong password, a locked email, an email over 254 characters or without `@`, or a password over 1,024 characters returns `401` with the page. An `Origin` header naming another host returns `403`. |
 | `POST` | `/logout` | Clears the cookie and redirects to `/login`. |
 | `GET` | `/` | The dashboard. |
 

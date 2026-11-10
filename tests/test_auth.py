@@ -445,3 +445,38 @@ def test_the_referrer_policy_lets_a_browser_name_its_own_origin(app):
     """
     policy = TestClient(app).get("/login").headers["referrer-policy"]
     assert policy in {"same-origin", "strict-origin", "strict-origin-when-cross-origin"}
+
+
+# Sign-in input the lockout must not store, and passwords too long to hash (issue #82).
+
+
+@pytest.mark.parametrize(
+    "email",
+    ["a" * 250 + "@x.test", "a" * 1_000_000 + "@x.test", "no-at-sign.test", "   "],
+)
+def test_sign_in_refuses_an_email_no_user_can_have_without_counting_it(app, email):
+    client = TestClient(app)
+    for _ in range(3):
+        response = client.post("/login", data={"email": email, "password": "wrong-password"})
+        assert response.status_code == 401
+        assert "do not match" in response.text
+    assert len(app.state.lockout) == 0
+
+
+def test_an_over_long_password_is_refused_without_hashing(app, monkeypatch):
+    with Session(app.state.engine) as session:
+        create_user(session, "owner@duebell.test", PASSWORD)
+    calls = []
+    monkeypatch.setattr(auth, "check_password", lambda *args: calls.append(args) or False)
+    response = TestClient(app).post(
+        "/login", data={"email": "owner@duebell.test", "password": "x" * (auth.MAX_PASSWORD_CHARS + 1)}
+    )
+    assert response.status_code == 401
+    assert "do not match" in response.text
+    assert calls == []
+    assert len(app.state.lockout) == 1
+
+
+def test_create_user_refuses_a_password_sign_in_would_refuse(app):
+    with Session(app.state.engine) as session, pytest.raises(AuthError):
+        create_user(session, "owner@duebell.test", "x" * (auth.MAX_PASSWORD_CHARS + 1))

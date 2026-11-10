@@ -6,7 +6,7 @@ There is no sign-up page. Whoever runs the server adds each user from the comman
 .venv/bin/python scripts/create_user.py you@example.com
 ```
 
-The script asks for a password of at least 10 characters. To pass it without a prompt, set `DUEBELL_PASSWORD` for that one command.
+The script asks for a password of 10 to 1,024 characters. To pass it without a prompt, set `DUEBELL_PASSWORD` for that one command.
 
 Each user sees only their own clients, invoices, reminders and schedules. Two users may bill the same client email.
 
