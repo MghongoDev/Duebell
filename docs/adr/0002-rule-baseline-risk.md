@@ -25,3 +25,7 @@ Ship a rule baseline in `app/risk.py`. It combines prior lateness share, average
 ## Revision, 2026-11-05
 
 Issue #23 added currencies. Amounts now compare only within one currency, while lateness still uses the client's whole history. A client's first invoice in a new currency has no usual amount to compare with, so it carries the limited-data label, with a reason saying so. A score that cannot see part of the evidence should say it is unsure, the same reasoning as for a new client.
+
+## Revision, 2026-11-10
+
+Issue #46 limited history to invoices with a known outcome: paid, or unpaid at least one full day past due. An open invoice that is not yet due used to count as paid on time, which made new clients look reliable and pulled late payers down. The live score and the risk comparison now build history with the same code. A client with only drafts and open invoices gets the limited-data label.

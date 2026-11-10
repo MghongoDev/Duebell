@@ -297,9 +297,14 @@ const statusCell = (params) =>
   `<span class="status status-${params.value.toLowerCase()}">${escapeHtml(params.value)}</span>`;
 const riskCell = (params) => {
   if (!params.value) return '<span class="muted">Not scored</span>';
-  const reasons = (params.data.risk_reasons || []).map((reason) => `<li>${escapeHtml(reason)}</li>`).join("");
+  // The server names why a score has limited data (issue #46). Show that
+  // reason once, under the limited-data label, as escaped text.
+  const limitedReason = params.data.limited_data ? params.data.limited_data_reason : null;
+  const reasons = (params.data.risk_reasons || [])
+    .filter((reason) => reason !== limitedReason)
+    .map((reason) => `<li>${escapeHtml(reason)}</li>`).join("");
   const ld = params.data.limited_data
-    ? `<li class="limited">Limited data: no history yet</li>`
+    ? `<li class="limited">Limited data${limitedReason ? `: ${escapeHtml(limitedReason)}` : ""}</li>`
     : "";
   return `<span class="risk risk-${params.value.toLowerCase()}">${escapeHtml(params.value)}</span><ul class="reasons">${reasons}${ld}</ul>`;
 };

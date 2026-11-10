@@ -48,6 +48,10 @@ _Avoid_: Rating, grade
 A risk result for a client with too little history to score with confidence. It is labeled as limited rather than presented as a firm score.
 _Avoid_: Cold-start score, default score
 
+**Known outcome**:
+An invoice that has been paid, or is unpaid at least one full day past its due date. Only these count toward a client's history in the risk score and the risk comparison. Drafts and cancelled invoices never count.
+_Avoid_: Settled invoice, closed invoice
+
 **Reminder**:
 A message that asks a client to pay an unpaid invoice. Duebell drafts it; a human approves it and picks the channel: PayPal, email, or both.
 _Avoid_: Nudge, follow-up, chase

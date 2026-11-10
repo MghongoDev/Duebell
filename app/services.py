@@ -1,4 +1,4 @@
-"""Invoice services for Duebell (issues #9, #11, #23, #24). See ADRs 0005 and 0008.
+"""Invoice services for Duebell (issues #9, #11, #23, #24, #46). See ADRs 0005 and 0008.
 
 Every read takes an ownership scope (app.ownership); creation records an owner.
 """
@@ -6,7 +6,7 @@ Every read takes an ownership scope (app.ownership); creation records an owner.
 from __future__ import annotations
 
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Mapping
 from uuid import uuid4
 
@@ -15,14 +15,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.config import Settings
-from app.models import Client, Event, Invoice, InvoiceStatus, Reminder, ReminderStatus, utcnow
+from app.models import Client, Event, Invoice, InvoiceStatus, Reminder, ReminderStatus, as_utc, utcnow
 from app.ownership import Scope, get_owned, owned
 from app.paypal import PayPalError, PayPalGateway, PayPalTimeout
-from app.risk import HistoryInvoice, RiskAssessment, score_invoice
+from app.risk import HistoryInvoice, RiskAssessment, limited_data_reason, score_invoice
 from app.validation import InvoiceProposal, proposal_to_cents
 
 PAID_STATUSES = {InvoiceStatus.PAID, InvoiceStatus.MARKED_AS_PAID}
 CLOSED_STATUSES = PAID_STATUSES | {InvoiceStatus.CANCELLED, InvoiceStatus.REFUNDED}
+# Never part of a client's payment history (issue #46).
+NOT_HISTORY = {InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED}
 
 EVENT_STATUS = {
     "INVOICING.INVOICE.SENT": InvoiceStatus.SENT,
@@ -50,8 +52,9 @@ def preview_risk(
 ) -> RiskAssessment:
     """Score an invoice that does not exist yet. Writes nothing."""
     client = find_client(session, email, user_id)
-    history = client_history(session, client.id) if client else []
-    return score_invoice(amount_cents, terms_days, history, currency=currency.strip().upper())
+    now = utcnow()
+    history = client_history(session, client.id, now) if client else []
+    return score_invoice(amount_cents, terms_days, history, now=now, currency=currency.strip().upper())
 
 
 def get_or_create_client(session: Session, name: str, email: str, user_id: int | None) -> Client:
@@ -95,18 +98,34 @@ def _insert_numbered(session: Session, invoice: Invoice) -> None:
     raise PayPalError("Could not give the invoice a unique number. Try again.")
 
 
-def client_history(session: Session, client_id: int) -> list[HistoryInvoice]:
-    invoices = session.exec(select(Invoice).where(Invoice.client_id == client_id)).all()
-    return [
-        HistoryInvoice(
-            amount_cents=item.amount_cents,
-            due_at=item.due_at,
-            paid_at=item.paid_at,
-            currency=item.currency,
+def history_as_of(invoices: list[Invoice], as_of: datetime) -> list[HistoryInvoice]:
+    """A client's invoices as they stood at `as_of`. Live scoring and the refit both use this (issue #46).
+
+    Drafts were never sent and cancelled invoices were withdrawn, so neither
+    is history. Invoice has no cancellation date, so an invoice cancelled
+    after `as_of` is left out too. A payment after `as_of` had not happened
+    yet. The risk rule then counts only invoices whose outcome is known at
+    `as_of` (app.risk.outcome_known).
+    """
+    history = []
+    for item in invoices:
+        if item.status in NOT_HISTORY or as_utc(item.issued_at) >= as_of:
+            continue
+        paid = as_utc(item.paid_at)
+        history.append(
+            HistoryInvoice(
+                amount_cents=item.amount_cents,
+                due_at=as_utc(item.due_at),
+                paid_at=paid if paid is not None and paid <= as_of else None,
+                currency=item.currency,
+            )
         )
-        for item in invoices
-        if item.status != InvoiceStatus.CANCELLED
-    ]
+    return history
+
+
+def client_history(session: Session, client_id: int, now: datetime | None = None) -> list[HistoryInvoice]:
+    invoices = session.exec(select(Invoice).where(Invoice.client_id == client_id)).all()
+    return history_as_of(list(invoices), as_utc(now or utcnow()))
 
 
 def create_invoice(
@@ -125,7 +144,8 @@ def create_invoice(
     assessment = score_invoice(
         amount_cents,
         proposal.terms_days,
-        client_history(session, client.id),
+        client_history(session, client.id, now),
+        now=now,
         currency=currency,
     )
     invoice = Invoice(
@@ -228,6 +248,7 @@ def invoice_rows(session: Session, scope: Scope) -> list[dict]:
         client = clients.get(invoice.client_id)
         closed = invoice.status in CLOSED_STATUSES
         overdue = not closed and invoice.due_at < now
+        reasons = [line for line in invoice.risk_reasons.splitlines() if line.strip()]
         rows.append(
             {
                 "id": invoice.id,
@@ -248,8 +269,9 @@ def invoice_rows(session: Session, scope: Scope) -> list[dict]:
                 "closed": closed,
                 "risk_score": invoice.risk_score,
                 "risk_level": invoice.risk_level,
-                "risk_reasons": [line for line in invoice.risk_reasons.splitlines() if line.strip()],
+                "risk_reasons": reasons,
                 "limited_data": bool(invoice.limited_data),
+                "limited_data_reason": limited_data_reason(reasons) if invoice.limited_data else None,
                 "paypal_invoice_id": invoice.paypal_invoice_id,
             }
         )
