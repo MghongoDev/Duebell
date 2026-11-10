@@ -16,11 +16,19 @@ Find the message you see, then the fix.
 | You see | Cause | Fix |
 | --- | --- | --- |
 | "Mock parsing understands..." | Mock mode, or live mode without credentials. | Use the demo sentence, fill the form, or [use a live model](use-a-live-model.md). |
+| "The AI service sent a reply duebell could not read..." | In live mode, the model endpoint or a proxy answered with something other than a model reply, such as an HTML error page. | Check `ANTHROPIC_BASE_URL` and the proxy, try again, or fill the form. |
 | "Currency must be one of: ..." | The currency is not in `ALLOWED_CURRENCIES`. | Add it, or pick one from the list. |
 | "Instalments are only for a High-risk invoice." | The invoice does not score High. | Send it as one invoice. |
 | "PayPal rejected the call" with `NOT_AUTHORIZED` | The sandbox app lacks the Invoicing scope. | Turn on Invoicing for the app, or go back to mock mode. |
 | "PayPal credentials are missing." | `sandbox` or `toolkit` mode without credentials. | Set `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET`. |
 | The app stops at start, asking for `requirements-toolkit.txt` | Toolkit mode without the package. | Run `pip install -r requirements-toolkit.txt --no-deps`. |
+
+## Any action
+
+| You see | Cause | Fix |
+| --- | --- | --- |
+| "Could not reach the server..." | The browser got no reply at all. | Check your connection and that the app is running. |
+| "The server had an error (status N). Try again." | The app replied with an error page, not its usual JSON. | Try again. If it repeats, check the app log. |
 
 ## Reminders
 
