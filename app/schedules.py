@@ -298,15 +298,36 @@ on_invoice_sent(follow_sent)
 def send_draft(
     session: Session, invoice: Invoice, gateway: PayPalGateway, *, warnings: list[str] | None = None
 ) -> Invoice:
-    """Send a draft PayPal holds but has not sent, then follow it up (issues #41, #79).
+    """Send a draft PayPal holds but has not sent, then follow it up (issues #41, #79, #104).
 
     The send reuses the PayPal invoice, so it never creates a second one.
     Once it is sent, its held repeat starts and the scheduled item linked to
     it is marked SENT.
-    Raises ValueError if the invoice is not such a draft, InvoiceNotSent if
-    PayPal refuses.
+
+    One request at a time sends a linked draft. A pending linked item is
+    claimed for the send, as an approval claims it, so an approval that
+    arrives meanwhile is refused; a failed send gives the item back. While an
+    approval holds the item, this send is refused (issue #104).
+    Raises ValueError if the invoice is not such a draft or its item is being
+    sent, InvoiceNotSent if PayPal refuses.
     """
-    invoice = send_unsent_invoice(session, invoice, gateway, warnings=warnings)
+    item = session.exec(
+        select(ScheduledInvoice).where(
+            ScheduledInvoice.invoice_id == invoice.id, ScheduledInvoice.user_id == invoice.user_id
+        )
+    ).first()
+    claimed = item is not None and item.status == ScheduledInvoiceStatus.PENDING and _claim(session, item)
+    if item is not None and item.status == ScheduledInvoiceStatus.SENDING and not claimed:
+        raise ValueError("This invoice is already being sent.")
+    try:
+        invoice = send_unsent_invoice(session, invoice, gateway, warnings=warnings)
+    except Exception:
+        if claimed:
+            _release(session, item)
+        raise
+    if claimed:
+        # Give the item back, so follow_sent marks it SENT.
+        _unclaim(session, item)
     follow_sent(session, invoice)
     return invoice
 
