@@ -196,7 +196,12 @@ async def parse_description(request: Request):
         proposal = request.app.state.llm(text)
     except LLMError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
-    return JSONResponse({"ok": True, "proposal": proposal.model_dump(mode="json")})
+    # A field the model left out comes back empty and is named in `missing`,
+    # so the form can mark it for the person (issue #47).
+    fields = proposal.model_dump(mode="json")
+    missing = [name for name, value in fields.items() if value is None]
+    filled = {name: "" if value is None else value for name, value in fields.items()}
+    return JSONResponse({"ok": True, "proposal": filled, "missing": missing})
 
 
 @router.get("/api/invoices", response_class=JSONResponse)

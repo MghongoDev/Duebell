@@ -186,6 +186,12 @@ body {
   border-color: var(--accent);
 }
 
+/* A field the AI left out, for the person to fill in (issue #47). */
+.invoice-form .missing {
+  border-color: var(--amber);
+  background: var(--amber-soft);
+}
+
 .ai-draft {
   display: grid;
   gap: 0.6rem;
