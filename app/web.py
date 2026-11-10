@@ -121,7 +121,7 @@ def create_app(
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Referrer-Policy"] = "same-origin"
         # Scripts come only from /static, where the vendored AG Grid and htmx
         # live (issue #49). AG Grid and htmx inject <style> tags and style
         # attributes at run time, so styles still allow 'unsafe-inline'.

@@ -55,7 +55,7 @@ The scheduler is the only caller that may scan every user. It says so explicitly
 | Browser to app | A session for every non-public path. All input validated: amounts capped, currencies on a list, text lengths limited. |
 | User to user | Every query scoped to one user. |
 | Model to app | An untrusted form filler. Duebell checks its JSON against a fixed set of keys, then validates the values. |
-| PayPal to app | PayPal checks the webhook signature before Duebell changes anything. Event IDs make replays harmless. |
+| PayPal to app | PayPal checks the webhook signature before Duebell changes anything. Event IDs make replays harmless, and a status only moves forward. |
 | App to PayPal | Only through the gateway, and only in `sandbox` or `toolkit` mode. |
 | App to client | Only after an approval, through PayPal or email. |
 

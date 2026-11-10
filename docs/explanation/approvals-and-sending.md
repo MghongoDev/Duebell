@@ -15,6 +15,8 @@ The reason is cost. A wrong reminder can damage a client relationship, and a wro
 
 The scan runs every 30 minutes and on `Scan now`. It drafts a reminder for a sent invoice that is overdue, or due within the reminder window and scored Medium or High. It skips invoices with no PayPal ID, because a draft for them could never be sent. It also skips invoices that already have a pending or sent reminder.
 
+The scheduler and `Scan now` can run at the same moment. Each still acts once. A scan claims a due scheduled invoice with one conditional update before it queues the next one, so a repeat never gains an extra invoice. The database allows one pending reminder per invoice, so a second scan's draft is refused and skipped.
+
 Once an invoice is paid, cancelled or refunded, its pending drafts are rejected: by the webhook or refresh that closes it, by a simulated payment, and by the next scan. Approving a draft for a closed invoice is refused and rejects the draft, so a client never gets a reminder for an invoice they have paid.
 
 ## Channels

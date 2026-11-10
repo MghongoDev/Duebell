@@ -11,6 +11,7 @@ The defaults run the whole demo with no credentials. A blank value, such as `ANT
 | `PAYPAL_MODE` | `mock` | `mock`, `sandbox`, `toolkit` | Picks the [gateway](../../GLOSSARY.md). `mock` keeps invoices in memory. `sandbox` calls the PayPal sandbox REST API. `toolkit` sends, reminds, records payments and reads status through PayPal's Agent Toolkit ([ADR 0006](../adr/0006-agent-toolkit-adapter.md)). |
 | `LLM_MODE` | `mock` | `mock`, `live` | `mock` parses only the demo sentence. `live` calls an Anthropic-compatible model. |
 | `EMAIL_MODE` | `mock` | `mock`, `smtp` | `mock` keeps reminder emails in memory. `smtp` sends them. |
+| `MOCK_WEBHOOKS` | `false` | `true`, `false` | Mock mode cannot check a webhook's signature, so it refuses every webhook with `401` and stores nothing unless this is `true`. `1`, `yes` and `on` also count as true. `.env.example` turns it on for the local demo. Leave it off on a public host; `render.yaml` does. It has no effect in `sandbox` or `toolkit` mode, which always check the signature through PayPal. |
 
 Any value other than those listed falls back to `mock`.
 
@@ -63,7 +64,7 @@ If live mode lacks a credential or a base URL, parsing falls back to the mock pa
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `ALLOWED_CURRENCIES` | `USD` | Comma-separated, for example `USD,EUR`. The first is the form default. |
-| `AMOUNT_CAP_CENTS` | `1000000` | The largest invoice amount, in cents. |
+| `AMOUNT_CAP_CENTS` | `1000000` | The largest invoice amount, in the currency's minor units: cents for USD, yen for JPY. The same number applies to every currency. |
 | `TERMS_MIN_DAYS` | `0` | |
 | `TERMS_MAX_DAYS` | `120` | |
 | `REMINDER_WINDOW_DAYS` | `3` | How many days before the due date the scan may draft a reminder for a Medium or High risk invoice. |

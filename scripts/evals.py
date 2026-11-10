@@ -228,11 +228,11 @@ def run_reminder_eval(settings: Settings) -> bool:
             tone == expected_tone,
             "Acme Studio" in text,
             invoice.invoice_number in text,
-            money(invoice.amount_cents) in text,
+            money(invoice.amount_cents, invoice.currency) in text,
             invoice.due_at.strftime("%d %b %Y") in text,
         ]
         amounts = re.findall(r"\d[\d,]*\.\d{2}", text)
-        checks.append(amounts == [money(invoice.amount_cents)])
+        checks.append(amounts == [money(invoice.amount_cents, invoice.currency)])
         if all(checks):
             passed += 1
         else:
@@ -244,7 +244,8 @@ def run_reminder_eval(settings: Settings) -> bool:
 def run_webhook_eval(settings: Settings) -> bool:
     engine = make_engine("sqlite://")
     init_db(engine)
-    gateway = MockPayPal()
+    settings = replace(settings, mock_webhooks=True)  # the eval posts mock webhooks (issue #38)
+    gateway = MockPayPal(accepts_webhooks=settings.mock_webhooks)
     with Session(engine) as session:
         invoice = create_invoice(
             session,

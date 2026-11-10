@@ -434,3 +434,14 @@ def test_sign_in_accepts_its_own_origin_or_none(app, headers):
         follow_redirects=False,
     )
     assert response.status_code == 303
+
+
+def test_the_referrer_policy_lets_a_browser_name_its_own_origin(app):
+    """Under no-referrer a browser sends Origin: null on a same-site form post.
+
+    The sign-in check refuses null, so no-referrer locked every browser out
+    while these tests, which set Origin by hand, still passed. A policy that
+    keeps the origin for same-site requests avoids that.
+    """
+    policy = TestClient(app).get("/login").headers["referrer-policy"]
+    assert policy in {"same-origin", "strict-origin", "strict-origin-when-cross-origin"}

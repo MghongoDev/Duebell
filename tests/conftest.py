@@ -70,6 +70,7 @@ def add_late_payer(test_client: TestClient) -> dict:
 def settings():
     return Settings(
         database_url="sqlite://",
+        mock_webhooks=True,  # tests post webhooks to the mock gateway (issue #38)
         amount_cap_cents=1_000_000,
         allowed_currencies=("USD",),
         terms_min_days=0,
