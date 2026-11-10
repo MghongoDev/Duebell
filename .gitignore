@@ -7,6 +7,9 @@ duebell.db
 *.db
 *.sqlite3
 
+# Agent worktrees (issue #62)
+.claude/worktrees/
+
 # Local notes and planning
 .scratch/
 scratch/
