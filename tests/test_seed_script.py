@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pytest
 from sqlmodel import Session, select
@@ -61,3 +62,61 @@ def test_rerun_on_a_seeded_database_changes_nothing(run_seed, monkeypatch, capsy
 
     assert counts(engine) == (1, 6, 26)
     assert "already" in capsys.readouterr().out
+
+
+
+def counts_on_disk(tmp_path) -> tuple[int, int, int]:
+    """Count through a new engine, since a pooled connection would still read a deleted file."""
+    engine = make_engine(f"sqlite:///{tmp_path / 'seed.db'}")
+    try:
+        return counts(engine)
+    finally:
+        engine.dispose()
+
+
+def seed_then_set_password(run_seed, monkeypatch, tmp_path, password: str | None) -> None:
+    """Seed with the default password, then set DEMO_PASSWORD for the next run."""
+    monkeypatch.delenv("DEMO_PASSWORD", raising=False)
+    run_seed().dispose()
+    assert counts_on_disk(tmp_path) == (1, 6, 26)
+    if password is not None:
+        monkeypatch.setenv("DEMO_PASSWORD", password)
+
+
+def test_reset_with_a_short_password_keeps_the_data(run_seed, monkeypatch, tmp_path):
+    """The password is checked before the database is deleted (issue #102)."""
+    seed_then_set_password(run_seed, monkeypatch, tmp_path, "short")
+
+    with pytest.raises(SystemExit) as exit_info:
+        run_seed("--reset")
+
+    message = str(exit_info.value.code)
+    assert message.startswith("DEMO_PASSWORD is not usable:")
+    assert "10 characters" in message
+    assert "\n" not in message
+    assert counts_on_disk(tmp_path) == (1, 6, 26)
+
+
+def test_reset_demo_script_with_a_short_password_keeps_the_data(run_seed, monkeypatch, tmp_path):
+    """scripts/reset_demo.py keeps the data too (issue #102)."""
+    import runpy
+
+    seed_then_set_password(run_seed, monkeypatch, tmp_path, "short")
+    monkeypatch.setattr(sys, "argv", ["reset_demo.py"])
+    script = Path(__file__).resolve().parents[1] / "scripts" / "reset_demo.py"
+
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_path(str(script), run_name="__main__")
+
+    assert str(exit_info.value.code).startswith("DEMO_PASSWORD is not usable:")
+    assert counts_on_disk(tmp_path) == (1, 6, 26)
+
+
+def test_reset_requiring_an_unset_password_keeps_the_data(run_seed, monkeypatch, tmp_path):
+    seed_then_set_password(run_seed, monkeypatch, tmp_path, None)
+
+    with pytest.raises(SystemExit) as exit_info:
+        run_seed("--reset", "--require-password")
+
+    assert "Set DEMO_PASSWORD" in str(exit_info.value.code)
+    assert counts_on_disk(tmp_path) == (1, 6, 26)

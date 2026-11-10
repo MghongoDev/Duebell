@@ -70,14 +70,19 @@ def valid_email(email: str) -> bool:
     return "@" in email and len(email) <= MAX_EMAIL_CHARS
 
 
-def create_user(session: Session, email: str, password: str) -> User:
-    email = email.strip().lower()
-    if not valid_email(email):
-        raise AuthError("Enter a valid email address.")
+def validate_password(password: str) -> None:
+    """Raise AuthError if create_user would refuse `password`, so a caller can check it first (issue #102)."""
     if len(password) < MIN_PASSWORD_CHARS:
         raise AuthError(f"Use a password of at least {MIN_PASSWORD_CHARS} characters.")
     if len(password) > MAX_PASSWORD_CHARS:
         raise AuthError(f"Use a password of at most {MAX_PASSWORD_CHARS} characters.")
+
+
+def create_user(session: Session, email: str, password: str) -> User:
+    email = email.strip().lower()
+    if not valid_email(email):
+        raise AuthError("Enter a valid email address.")
+    validate_password(password)
     if session.exec(select(User).where(User.email == email)).first():
         raise AuthError("A user with that email already exists.")
     user = User(email=email, password_hash=hash_password(password))
