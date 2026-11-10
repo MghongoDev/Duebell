@@ -19,7 +19,7 @@ from app.config import Settings
 from app.mailer import Mailer
 from app.models import Client, Invoice, InvoiceStatus, Reminder, ReminderStage, ReminderStatus, utcnow
 from app.ownership import Scope, owned
-from app.paypal import PayPalGateway, PayPalTimeout
+from app.paypal import PayPalError, PayPalGateway, PayPalTimeout
 from app.risk import RiskLevel
 from app.services import CLOSED_STATUSES, money, reject_drafts_if_closed
 
@@ -235,6 +235,8 @@ def send_reminder(
     Each channel is recorded as soon as it succeeds. If a later channel fails,
     the claim is released, the draft is pending again, and a retry skips the
     channels already done, so PayPal never sends the same reminder twice.
+    PayPal's attempt is saved before the call, so a retry also skips PayPal
+    when the save after the call failed (issue #75).
     """
     if reminder.status != ReminderStatus.PENDING:
         raise ValueError("Only a pending draft can be sent.")
@@ -256,6 +258,20 @@ def send_reminder(
     warnings: list[str] = []
 
     def via_paypal() -> None:
+        if reminder.paypal_attempted_at is not None:
+            # An earlier approval asked PayPal, then failed before it could
+            # record the result. PayPal may have sent it, so count it as sent,
+            # as a timeout does (issue #75).
+            warnings.append(
+                "An earlier approval asked PayPal to send this reminder but could not record the result. "
+                "Duebell counts it as sent so it never goes twice. Check PayPal."
+            )
+            return
+        # Save the attempt before the call. If anything after the call fails,
+        # the retry sees it and skips PayPal (issue #75).
+        reminder.paypal_attempted_at = utcnow()
+        session.add(reminder)
+        session.commit()
         try:
             gateway.send_reminder(invoice.paypal_invoice_id, subject, reminder.draft_text)
         except PayPalTimeout:
@@ -265,6 +281,13 @@ def send_reminder(
                 "PayPal did not confirm the reminder in time and may still send it. "
                 "Duebell counts it as sent so it never goes twice. Check PayPal."
             )
+        except PayPalError:
+            # PayPal refused the call, so nothing went out. Free PayPal for a
+            # retry. If this save fails too, the retry skips PayPal instead.
+            reminder.paypal_attempted_at = None
+            session.add(reminder)
+            session.commit()
+            raise
 
     def via_email() -> None:
         client = session.get(Client, invoice.client_id)

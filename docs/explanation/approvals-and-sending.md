@@ -33,15 +33,16 @@ Duebell records each channel the moment it succeeds. If email then fails, the re
 
 ## Never sending twice
 
-Three failures could each lead to a duplicate. Duebell handles each one differently.
+Four failures could each lead to a duplicate. Duebell handles each one differently.
 
 | Failure | What could go wrong | What Duebell does |
 | --- | --- | --- |
 | PayPal creates an invoice, then the send fails | A retry creates a second invoice. | The invoice stays a draft with its PayPal ID. Approving again, or clicking **Send** on the draft's row, sends that draft. |
 | Email fails after PayPal sent the reminder | A retry reminds through PayPal again. | `sent_channels` records PayPal, and the retry skips it. |
 | A toolkit call times out | The call keeps running and may still send. A retry sends again. | It counts the PayPal reminder as sent and warns the user to check PayPal. |
+| PayPal sends the reminder, then Duebell fails to save that | A retry reminds through PayPal again. | Duebell saves `paypal_attempted_at` before it calls PayPal. The retry finds it, counts the PayPal reminder as sent, and warns the user to check PayPal. If PayPal refused the call, Duebell clears it, so the retry sends through PayPal. |
 
-The third case trades one possible missed reminder for no duplicate. A duplicate reaches the client. A missed one shows up when the user checks PayPal, and they can remind from there. Duebell will not draft another reminder for that invoice in the same stage, because it counts this one as sent.
+The last two cases trade one possible missed reminder for no duplicate. A duplicate reaches the client. A missed one shows up when the user checks PayPal, and they can remind from there. Duebell will not draft another reminder for that invoice in the same stage, because it counts this one as sent.
 
 ### Retries inside one call
 
