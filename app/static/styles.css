@@ -17,7 +17,8 @@
   --shadow: 0 18px 40px rgba(23, 33, 43, 0.08);
 }
 
-/* The hidden attribute always hides, whatever display a class sets (issue #63). */
+/* The hidden attribute always hides, whatever display a class sets (issue #63).
+   To show such an element, remove hidden; setting style.display will not. */
 [hidden] {
   display: none !important;
 }
