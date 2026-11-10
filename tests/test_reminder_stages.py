@@ -172,3 +172,50 @@ def test_an_old_database_gains_an_empty_stage_column(tmp_path):
         assert connection.execute(text("SELECT stage FROM reminder")).scalar_one() is None
     with Session(engine) as session:
         assert session.exec(select(Reminder)).one().stage is None
+
+
+# One overdue test for eligibility, stage and wording: past due_at (issue #80).
+
+
+def test_a_low_risk_invoice_hours_past_due_gets_one_overdue_reminder(client):
+    seed_invoice(client, due_days=-1 / 12, risk="LOW")
+    with Session(client.app.state.engine) as session:
+        [draft] = _scan(client, session)
+        assert draft.stage == "OVERDUE"
+        assert "was due on" in draft.draft_text
+        assert "is due on" not in draft.draft_text
+        _send(client, session, draft)
+        assert _scan(client, session, utcnow() + timedelta(days=1)) == []
+
+
+def test_a_medium_risk_invoice_hours_past_due_gets_overdue_wording(client):
+    seed_invoice(client, due_days=-1 / 12, risk="MEDIUM")
+    with Session(client.app.state.engine) as session:
+        [draft] = _scan(client, session)
+    assert draft.stage == "OVERDUE"
+    assert "is due on" not in draft.draft_text
+
+
+def test_an_invoice_on_terms_of_0_days_is_overdue_at_once(client):
+    seed_invoice(client, due_days=0, risk="LOW")
+    with Session(client.app.state.engine) as session:
+        [draft] = _scan(client, session, utcnow() + timedelta(minutes=1))
+    assert draft.stage == "OVERDUE"
+    assert "was due on" in draft.draft_text
+
+
+def test_an_invoice_not_yet_due_gets_before_due_wording(client):
+    seed_invoice(client, due_days=1 / 12, risk="MEDIUM")
+    with Session(client.app.state.engine) as session:
+        [draft] = _scan(client, session)
+    assert draft.stage == "BEFORE_DUE"
+    assert "is due on" in draft.draft_text
+
+
+def test_a_reminder_without_a_stage_drafted_hours_after_the_due_date_counts_as_overdue(client):
+    invoice_id = seed_invoice(client, due_days=-3)
+    with Session(client.app.state.engine) as session:
+        due_at = session.get(Invoice, invoice_id).due_at
+    _legacy_sent_reminder(client, invoice_id, due_at + timedelta(hours=2))
+    with Session(client.app.state.engine) as session:
+        assert _scan(client, session) == []
