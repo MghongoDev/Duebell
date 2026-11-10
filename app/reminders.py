@@ -55,13 +55,13 @@ def reminder_text(
 
     if overdue_days > 0:
         opening = (
-            f"Invoice {invoice.invoice_number} for {money(invoice.amount_cents)} "
+            f"Invoice {invoice.invoice_number} for {money(invoice.amount_cents, invoice.currency)} "
             f"{invoice.currency} was due on {invoice.due_at:%d %b %Y} and is still open."
         )
     else:
         opening = (
             f"A friendly note that invoice {invoice.invoice_number} for "
-            f"{money(invoice.amount_cents)} {invoice.currency} is due on "
+            f"{money(invoice.amount_cents, invoice.currency)} {invoice.currency} is due on "
             f"{invoice.due_at:%d %b %Y}."
         )
 
@@ -291,7 +291,7 @@ def reminder_rows(session: Session, scope: Scope) -> list[dict]:
                 "invoice_id": reminder.invoice_id,
                 "invoice_number": invoice.invoice_number if invoice else "",
                 "client_name": client.name if client else "",
-                "amount_display": money(invoice.amount_cents) if invoice else "",
+                "amount_display": money(invoice.amount_cents, invoice.currency) if invoice else "",
                 "currency": invoice.currency if invoice else "",
                 "due_display": invoice.due_at.strftime("%d %b %Y") if invoice else "",
                 "draft_text": reminder.draft_text,

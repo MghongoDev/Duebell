@@ -20,8 +20,9 @@ router = APIRouter()
 async def api_risk_preview(request: Request, session: Session = Depends(get_session)):
     """Score a draft form without saving anything, so the form can offer a plan."""
     form = await request.form()
+    currency = str(form.get("currency", "USD"))
     try:
-        amount_cents = proposal_to_cents(Decimal(str(form.get("amount", "")).strip()))
+        amount_cents = proposal_to_cents(Decimal(str(form.get("amount", "")).strip()), currency)
         terms = int(str(form.get("terms_days", "14")))
     except (InvalidOperation, ValueError):
         return JSONResponse({"ok": False, "error": "Enter an amount and terms first."}, status_code=422)
@@ -31,7 +32,7 @@ async def api_risk_preview(request: Request, session: Session = Depends(get_sess
         email=str(form.get("client_email", "")),
         amount_cents=amount_cents,
         terms_days=terms,
-        currency=str(form.get("currency", "USD")),
+        currency=currency,
     )
     return {"ok": True, "level": result.level, "score": result.score, "reasons": result.reasons}
 

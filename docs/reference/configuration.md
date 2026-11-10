@@ -64,7 +64,7 @@ If live mode lacks a credential or a base URL, parsing falls back to the mock pa
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `ALLOWED_CURRENCIES` | `USD` | Comma-separated, for example `USD,EUR`. The first is the form default. |
-| `AMOUNT_CAP_CENTS` | `1000000` | The largest invoice amount, in cents. |
+| `AMOUNT_CAP_CENTS` | `1000000` | The largest invoice amount, in the currency's minor units: cents for USD, yen for JPY. The same number applies to every currency. |
 | `TERMS_MIN_DAYS` | `0` | |
 | `TERMS_MAX_DAYS` | `120` | |
 | `REMINDER_WINDOW_DAYS` | `3` | How many days before the due date the scan may draft a reminder for a Medium or High risk invoice. |

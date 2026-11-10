@@ -17,7 +17,7 @@ Every table that holds a user's data has a `user_id` ([ADR 0008](../adr/0008-sig
 | `scheduledinvoice` | A **scheduled invoice**. | `schedule_id`, `sequence`, `amount_cents`, `issue_on`, `status`, `invoice_id`. `schedule_id` and `sequence` together are unique. |
 | `riskcomparison` | One refit of the **risk comparison**. | `status`, `rows_used`, `late_count`, `test_rows`, `baseline_accuracy`, `baseline_auc`, `logistic_accuracy`, `logistic_auc`, `message`. |
 
-Amounts are whole cents. Times are stored in UTC, and every time column reads back as an aware UTC datetime, whichever sqlmodel version is installed.
+Amounts are whole minor units of their currency, despite the `_cents` name: cents for USD, yen for JPY. So 12.50 USD is stored as `1250` and 1000 JPY as `1000`. Times are stored in UTC, and every time column reads back as an aware UTC datetime, whichever sqlmodel version is installed.
 
 An invoice's `due_at` is its `issued_at` plus `terms_days`. Duebell sends PayPal that date as the invoice's `due_date`, so the client sees the same **due date** that reminders and the overdue flag use. Terms of 0 days are sent as due on receipt.
 
