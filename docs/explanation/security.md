@@ -27,8 +27,25 @@ A webhook event belongs to the owner of the invoice it touches.
 - Duebell stores each event once by its PayPal ID, so a replay does nothing, and it refuses webhook bodies over 1 MB.
 - The model's output is untrusted. It may only fill six known fields, and the same validation as the manual form checks them ([ADR 0004](../adr/0004-llm-as-form-filler.md)).
 - Amounts are capped, currencies come from a list, and text fields have length limits. See [configuration](../reference/configuration.md).
-- Every response carries security headers and a content security policy.
+- Every response carries security headers and a content security policy. See below.
 - Secrets live in `.env`, which git ignores.
+
+## Content security policy
+
+The policy tells the browser what the page may load and run:
+
+```
+default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
+img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'
+```
+
+- Scripts run only from Duebell's own `/static` folder. The browser refuses inline script, `on...=` handlers and scripts from any other host, so text an attacker slips into the page cannot run.
+- Duebell serves AG Grid and htmx itself, from `app/static/vendor/`, instead of loading them from a CDN. The README there records each file's source, version and SHA-256 hash, and a test checks the files still match.
+- The dashboard's own code lives in `app/static/dashboard.js`. The page hands it data in a `<script type="application/json">` block and in `data-` attributes, which the browser does not run.
+- Styles still allow `'unsafe-inline'`. AG Grid and htmx add `<style>` tags and `style` attributes as they run, and would break without it. Injected CSS can change how the page looks but cannot run code.
+- The page may fetch only from Duebell itself, and no other site may frame it.
+
+`tests/test_csp.py` fails if the script rule loosens, if the policy names another host, or if a template gains inline script.
 
 ## Known gaps
 

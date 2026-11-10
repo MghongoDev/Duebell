@@ -125,9 +125,10 @@ def test_dashboard_shows_the_servers_limited_data_reason(client):
     row = client.get("/api/invoices").json()[0]
     assert row["limited_data"] is True
     assert row["limited_data_reason"].startswith("New client.")
-    page = client.get("/").text
-    assert "no history yet" not in page
-    assert "escapeHtml(limitedReason)" in page
+    # The dashboard's script is a static file since #49.
+    script = client.get("/static/dashboard.js").text
+    assert "no history yet" not in client.get("/").text + script
+    assert "escapeHtml(limitedReason)" in script
 
 
 def test_late_payer_with_open_invoices_still_scores_high(client):
