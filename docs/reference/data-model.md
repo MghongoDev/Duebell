@@ -46,7 +46,7 @@ Each set of values below has its own type in the code. The database stores the p
 | `CANCELLED`, `REFUNDED` | Closed without payment, or refunded. |
 | `OVERDUE` | Duebell never sets it, but a refresh stores it if PayPal reports it. The scan and the outstanding total treat it like `SENT`. |
 
-A refresh stores whatever status PayPal reports. The dashboard's overdue flag is computed: an invoice is overdue when it is past its due date and not paid, cancelled or refunded.
+A status only moves forward. A webhook or refresh never moves an invoice out of `PAID`, `MARKED_AS_PAID`, `CANCELLED` or `REFUNDED`, except from paid to `REFUNDED`, and never moves it back to `DRAFT`. A refresh ignores any status not in this table, such as `UNKNOWN`. The dashboard's overdue flag is computed: an invoice is overdue when it is past its due date and not paid, cancelled or refunded.
 
 ### Reminder
 

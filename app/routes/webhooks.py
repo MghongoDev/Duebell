@@ -23,7 +23,11 @@ async def paypal_webhook(request: Request, session: Session = Depends(get_sessio
     raw = await request.body()
     if len(raw) > MAX_WEBHOOK_BYTES:
         return JSONResponse({"ok": False, "error": "payload too large"}, status_code=413)
-    body = raw.decode("utf-8")
+    try:
+        body = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        # A body that is not UTF-8 cannot be valid JSON (issue #37).
+        return JSONResponse({"ok": False, "error": "invalid json"}, status_code=400)
     result = handle_webhook(
         session,
         request.app.state.gateway,
