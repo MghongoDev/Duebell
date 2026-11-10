@@ -24,7 +24,7 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 | `POST` | `/parse` | Field `description`, the free text. Returns `{"proposal": {...}}` with the six form fields. Creates nothing. `422` if the parser or validation rejects it. |
 | `GET` | `/api/invoices` | The user's invoices as dashboard rows. |
 | `POST` | `/api/invoices/{invoice_id}/refresh` | Reads the status from PayPal and stores it. Returns `{"status": ...}`. |
-| `POST` | `/api/invoices/{invoice_id}/simulate-payment` | Records a payment through the gateway and marks the invoice `PAID`. |
+| `POST` | `/api/invoices/{invoice_id}/simulate-payment` | Records a payment through the gateway and marks the invoice `PAID`. `409` if the invoice has no PayPal ID or is already paid, cancelled or refunded. |
 
 ## Risk
 
@@ -41,7 +41,7 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 | `POST` | `/api/reminders/scan` | Drafts reminders and moves due scheduled invoices to pending. Sends nothing. Returns `{"created": n, "scheduled": m}`. |
 | `GET` | `/api/reminders` | The user's reminders, newest first. |
 | `POST` | `/api/reminders/{reminder_id}/edit` | Field `draft_text`. Saves a new draft. `409` unless the draft is pending. |
-| `POST` | `/api/reminders/{reminder_id}/approve` | Field `channel`: `paypal` (the default), `email` or `both`. Sends through each channel not yet used. Returns `status`, `sent_channels`, and a `warning` if PayPal did not confirm in time. `409` if the draft is not pending or the invoice has no PayPal ID. `502` if a channel fails; the draft stays pending. |
+| `POST` | `/api/reminders/{reminder_id}/approve` | Field `channel`: `paypal` (the default), `email` or `both`. Sends through each channel not yet used. Returns `status`, `sent_channels`, and a `warning` if PayPal did not confirm in time. `409` if the draft is not pending or the invoice has no PayPal ID. `409` too if the invoice is paid, cancelled or refunded; the draft is then marked `REJECTED`. `502` if a channel fails; the draft stays pending. |
 | `POST` | `/api/reminders/{reminder_id}/reject` | Marks the draft `REJECTED`. A later scan may draft a new one. |
 
 ## Scheduled invoices

@@ -225,6 +225,8 @@ def api_simulate_payment(
         return JSONResponse({"ok": False, "error": "Invoice not found."}, status_code=404)
     try:
         simulate_payment(session, invoice, request.app.state.gateway)
-    except (PayPalError, ValueError) as exc:
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+    except PayPalError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
     return {"ok": True, "status": invoice.status}
