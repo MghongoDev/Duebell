@@ -1,6 +1,6 @@
-"""Creating, parsing, listing, refreshing and paying invoices.
+"""Creating, parsing, listing, sending, refreshing and paying invoices.
 
-Issues #9-#11, #14, #23, #25. The model only fills the form (ADR 0004), PayPal
+Issues #9-#11, #14, #23, #25, #41. The model only fills the form (ADR 0004), PayPal
 is reached through the gateway (ADR 0001), and schedules wait for approval
 (ADR 0007). Every lookup is scoped to the signed-in user (ADR 0008).
 """
@@ -21,11 +21,14 @@ from app.routes.dashboard import render_dashboard
 from app.schedules import (
     ScheduleBasis,
     create_plan,
-    create_recurring,
     draft_scheduled,
+    hold_repeat,
     parse_schedule_request,
+    repeat_invoice,
+    send_draft,
 )
 from app.services import (
+    InvoiceNotSent,
     create_invoice,
     get_invoice,
     get_or_create_client,
@@ -154,6 +157,10 @@ def create_invoice_form(
             warnings=warnings,
         )
     except PayPalError as exc:
+        if isinstance(exc, InvoiceNotSent) and schedule_request.repeat:
+            # PayPal holds the invoice unsent. The Send action on the dashboard
+            # sends it and then starts the repeat (issue #41).
+            hold_repeat(session, exc.invoice, schedule_request.repeat, schedule_request.repeat_cycles)
         return render_dashboard(
             request,
             session,
@@ -162,21 +169,7 @@ def create_invoice_form(
             status_code=502,
         )
     if schedule_request.repeat:
-        basis = ScheduleBasis(
-            user_id=invoice.user_id,
-            client_id=invoice.client_id,
-            description=invoice.description,
-            amount_cents=invoice.amount_cents,
-            currency=invoice.currency,
-            terms_days=invoice.terms_days,
-        )
-        create_recurring(
-            session,
-            basis,
-            interval_unit=schedule_request.repeat,
-            cycles=schedule_request.repeat_cycles,
-            start=invoice.issued_at,
-        )
+        repeat_invoice(session, invoice, schedule_request.repeat, schedule_request.repeat_cycles)
     return RedirectResponse(url="/?notice=send-unconfirmed" if warnings else "/", status_code=303)
 
 
@@ -241,3 +234,26 @@ def api_simulate_payment(
     except PayPalError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
     return {"ok": True, "status": invoice.status}
+
+
+@router.post("/api/invoices/{invoice_id}/send", response_class=JSONResponse)
+def api_send(
+    invoice_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Send a draft PayPal holds but has not sent, after a failed send (issue #41)."""
+    invoice = get_invoice(session, invoice_id, current_user_id(request))
+    if invoice is None:
+        return JSONResponse({"ok": False, "error": "Invoice not found."}, status_code=404)
+    warnings: list[str] = []
+    try:
+        send_draft(session, invoice, request.app.state.gateway, warnings=warnings)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+    except PayPalError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+    body = {"ok": True, "status": invoice.status}
+    if warnings:
+        body["warning"] = " ".join(warnings)
+    return body

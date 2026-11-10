@@ -11,6 +11,8 @@ An invoice can repeat, or you can split a High-risk one into instalments, but no
 
 The first invoice goes out at once. The next one waits until its date. The scan then moves it to **Scheduled invoices**, where you click **Approve and send** or **Skip this one**. Skipping one leaves the repeat running.
 
+If PayPal fails to send the first invoice, the page shows the error and the invoice stays a draft. Click **Send** on its row to try again. Do not submit the form again: that would create a second PayPal invoice. The repeat starts once the send succeeds.
+
 Monthly repeats keep the day of the month. When a month is shorter, the invoice moves to its last day. A repeat started on 31 January runs on 28 February (29 in a leap year), then 31 March and 30 April.
 
 ## Split an invoice into instalments
