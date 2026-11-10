@@ -23,7 +23,7 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 | `POST` | `/invoices` | Creates and sends an invoice from the form. Fields: `client_name`, `client_email`, `description`, `amount`, `currency`, `terms_days`. Optional: `repeat` (`WEEK` or `MONTH`) with `repeat_cycles`, or `instalments` (2 to 6) with `instalment_interval`. Redirects to `/` on success. Returns the page with field errors and `422` on bad input, or `502` when PayPal fails. |
 | `POST` | `/parse` | Field `description`, the free text. Returns `{"proposal": {...}, "missing": [...]}` with the six form fields. A field the model left out is an empty string and is named in `missing`. Creates nothing. `422` if the answer has an unknown key or a wrongly typed value, or a filled field fails validation. |
 | `GET` | `/api/invoices` | The user's invoices as dashboard rows. |
-| `POST` | `/api/invoices/{invoice_id}/refresh` | Reads the status from PayPal and stores it. Returns `{"status": ...}`. |
+| `POST` | `/api/invoices/{invoice_id}/refresh` | Reads the status from PayPal and stores it if it moves the invoice forward (see [statuses](data-model.md#invoice)). Returns `{"status": ...}` with the stored status. |
 | `POST` | `/api/invoices/{invoice_id}/simulate-payment` | Records a payment through the gateway and marks the invoice `PAID`. `409` if the invoice has no PayPal ID or is already paid, cancelled or refunded. |
 
 ## Risk
@@ -56,6 +56,6 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 
 | Method | Path | Does |
 | --- | --- | --- |
-| `POST` | `/webhooks/paypal` | Public. Checks the signature through PayPal before anything else. Stores each event once by its PayPal event ID, so a replay changes nothing. `400` for a bad signature, invalid JSON or a missing event ID. `413` above 1 MB. |
+| `POST` | `/webhooks/paypal` | Public. Checks the signature through PayPal before anything else. Stores each event once by its PayPal event ID, so a replay changes nothing. `400` for a bad signature, a body that is not UTF-8, invalid JSON or a missing event ID. `413` above 1 MB. |
 
-The webhook maps these PayPal events to invoice statuses: `INVOICING.INVOICE.SENT`, `.PAID`, `.CANCELLED` and `.REFUNDED`. The event belongs to the user who owns the invoice.
+The webhook maps these PayPal events to invoice statuses: `INVOICING.INVOICE.SENT`, `.PAID`, `.CANCELLED` and `.REFUNDED`. The event belongs to the user who owns the invoice. Duebell still stores an event that would move the invoice backward, such as `SENT` after `PAID`, but the event changes nothing and returns `"applied": false`.

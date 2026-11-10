@@ -23,6 +23,7 @@ from app.validation import InvoiceProposal, proposal_to_cents
 
 PAID_STATUSES = {InvoiceStatus.PAID, InvoiceStatus.MARKED_AS_PAID}
 CLOSED_STATUSES = PAID_STATUSES | {InvoiceStatus.CANCELLED, InvoiceStatus.REFUNDED}
+KNOWN_STATUSES = set(InvoiceStatus)
 
 EVENT_STATUS = {
     "INVOICING.INVOICE.SENT": InvoiceStatus.SENT,
@@ -312,6 +313,22 @@ def find_by_paypal_id(session: Session, paypal_invoice_id: str) -> Invoice | Non
     ).first()
 
 
+def may_replace(current: str, new: str) -> bool:
+    """Whether status new may replace status current (issue #37).
+
+    A status only moves forward. It never leaves a closed status, except that
+    a paid invoice may become refunded, and it never goes back to DRAFT. A
+    status Duebell does not know, such as the gateway's UNKNOWN, never applies.
+    """
+    if new not in KNOWN_STATUSES:
+        return False
+    if new == current:
+        return True
+    if current in CLOSED_STATUSES:
+        return current in PAID_STATUSES and new == InvoiceStatus.REFUNDED
+    return new != InvoiceStatus.DRAFT
+
+
 def apply_status(invoice: Invoice, status: str) -> None:
     invoice.status = status
     if status in PAID_STATUSES and invoice.paid_at is None:
@@ -338,7 +355,8 @@ def refresh_invoice(session: Session, invoice: Invoice, gateway) -> Invoice:
     if not invoice.paypal_invoice_id:
         return invoice
     status = gateway.get_invoice(invoice.paypal_invoice_id)
-    apply_status(invoice, status)
+    if may_replace(invoice.status, status):
+        apply_status(invoice, status)
     session.add(invoice)
     reject_drafts_if_closed(session, invoice)
     session.commit()
@@ -386,7 +404,7 @@ def handle_webhook(session: Session, gateway, headers: Mapping[str, str], body: 
     invoice = find_by_paypal_id(session, paypal_invoice_id) if paypal_invoice_id else None
     if invoice:
         owner_id = invoice.user_id
-    if invoice and status:
+    if invoice and status and may_replace(invoice.status, status):
         apply_status(invoice, status)
         session.add(invoice)
         reject_drafts_if_closed(session, invoice)
