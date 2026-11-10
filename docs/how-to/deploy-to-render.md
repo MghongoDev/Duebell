@@ -4,7 +4,7 @@
 
 1. Push the repository to GitHub.
 2. In Render, create a **Blueprint** from the repository.
-3. When Render asks for `DEMO_PASSWORD`, enter one of your own. Do not reuse the default from the README.
+3. When Render asks for `DEMO_PASSWORD`, enter one of your own of at least 10 characters. Do not reuse the default from the README.
 4. Wait for the deploy, then open the service URL and sign in as `demo@duebell.test`.
 
 The blueprint also:
@@ -16,7 +16,7 @@ The blueprint also:
 
 ## What the start command does
 
-It seeds the demo only when the database has no users, so a restart keeps everyone's data. It refuses to seed without `DEMO_PASSWORD`, and the deploy fails with "Set DEMO_PASSWORD." in the log.
+It seeds the demo only when the database has no users, so a restart keeps everyone's data. It refuses to seed without `DEMO_PASSWORD`, and the deploy fails with "Set DEMO_PASSWORD." in the log. A `DEMO_PASSWORD` under 10 characters fails the deploy with "DEMO_PASSWORD is not usable: Use a password of at least 10 characters." and writes nothing.
 
 The free plan's disk is wiped on each deploy, so each deploy starts from the seed. For data that lasts, attach a Render disk and point `DATABASE_URL` at a file on it.
 
