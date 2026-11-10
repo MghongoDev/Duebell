@@ -13,13 +13,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from sqlmodel import Session, select
+from sqlmodel import Session, select, update
 
 from app.config import Settings
 from app.models import (
     Client,
     IntervalUnit,
     Invoice,
+    InvoiceStatus,
     Schedule,
     ScheduledInvoice,
     ScheduledInvoiceStatus,
@@ -38,7 +39,7 @@ MIN_INSTALMENTS = 2
 MAX_INSTALMENTS = 6
 MAX_CYCLES = 60
 MAX_INTERVAL_COUNT = 12
-OPEN_STATUSES = (ScheduledInvoiceStatus.UPCOMING, ScheduledInvoiceStatus.PENDING)
+OPEN_STATUSES = (ScheduledInvoiceStatus.UPCOMING, ScheduledInvoiceStatus.PENDING, ScheduledInvoiceStatus.SENDING)
 
 
 @dataclass(frozen=True)
@@ -252,20 +253,71 @@ def draft_scheduled(session: Session, now: datetime | None = None, *, scope: Sco
     return drafted
 
 
+def _claim(session: Session, item: ScheduledInvoice) -> bool:
+    """Move PENDING to SENDING in one conditional update. Only one approval wins."""
+    result = session.exec(
+        update(ScheduledInvoice)
+        .where(ScheduledInvoice.id == item.id, ScheduledInvoice.status == ScheduledInvoiceStatus.PENDING)
+        .values(status=ScheduledInvoiceStatus.SENDING)
+    )
+    session.commit()
+    session.refresh(item)
+    return result.rowcount == 1
+
+
+def _release(session: Session, item: ScheduledInvoice) -> None:
+    session.rollback()
+    session.refresh(item)
+    item.status = ScheduledInvoiceStatus.PENDING
+    session.add(item)
+    session.commit()
+
+
+def release_interrupted(session: Session) -> int:
+    """Return items a stopped process left SENDING to PENDING. Run at startup.
+
+    A retry is safe: an item that reached PayPal keeps its invoice_id, and
+    approval then sends that invoice instead of creating another.
+    """
+    result = session.exec(
+        update(ScheduledInvoice)
+        .where(ScheduledInvoice.status == ScheduledInvoiceStatus.SENDING)
+        .values(status=ScheduledInvoiceStatus.PENDING)
+    )
+    session.commit()
+    return result.rowcount
+
+
 def approve_scheduled(
-    session: Session, item: ScheduledInvoice, settings: Settings, gateway: PayPalGateway
+    session: Session,
+    item: ScheduledInvoice,
+    settings: Settings,
+    gateway: PayPalGateway,
+    *,
+    warnings: list[str] | None = None,
 ) -> Invoice:
-    """Create and send the invoice through the normal path. The only way out."""
+    """Create and send the invoice through the normal path. The only way out.
+
+    The item is claimed before PayPal is called, so a double click or a second
+    tab gets a 409 instead of a second invoice (issue #39).
+    """
     if item.status != ScheduledInvoiceStatus.PENDING:
         raise ValueError("Only a pending scheduled invoice can be approved.")
     schedule = session.get(Schedule, item.schedule_id)
     client = session.get(Client, schedule.client_id) if schedule else None
     if schedule is None or client is None:
         raise ValueError("This scheduled invoice has lost its client.")
+    if not _claim(session, item):
+        raise ValueError("This scheduled invoice is already being approved.")
     try:
-        if item.invoice_id is not None:
+        linked = session.get(Invoice, item.invoice_id) if item.invoice_id is not None else None
+        if linked is not None and linked.status != InvoiceStatus.DRAFT:
+            # PayPal sent it after all, for example after a timeout; a webhook
+            # or refresh has said so. Nothing more to send.
+            invoice = linked
+        elif linked is not None:
             # An earlier approval created the PayPal invoice but could not send it.
-            invoice = send_unsent_invoice(session, session.get(Invoice, item.invoice_id), gateway)
+            invoice = send_unsent_invoice(session, linked, gateway, warnings=warnings)
         else:
             proposal = InvoiceProposal(
                 client_name=client.name,
@@ -275,11 +327,17 @@ def approve_scheduled(
                 currency=schedule.currency,
                 terms_days=schedule.terms_days,
             )
-            invoice = create_invoice(session, proposal, settings, gateway, user_id=schedule.user_id)
+            invoice = create_invoice(
+                session, proposal, settings, gateway, user_id=schedule.user_id, warnings=warnings
+            )
     except InvoiceNotSent as exc:
+        _release(session, item)
         item.invoice_id = exc.invoice.id
         session.add(item)
         session.commit()
+        raise
+    except Exception:
+        _release(session, item)
         raise
     item.status = ScheduledInvoiceStatus.SENT
     item.invoice_id = invoice.id

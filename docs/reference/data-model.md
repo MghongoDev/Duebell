@@ -68,7 +68,7 @@ A refresh stores whatever status PayPal reports. The dashboard's overdue flag is
 
 ### Scheduled invoice
 
-`UPCOMING`, then `PENDING` when the scan finds it due, then `SENT` once approved. It can also end `REJECTED` (skipped) or `CANCELLED` (its schedule was cancelled). `invoice_id` links the invoice it became. It is set before `SENT` if PayPal created the draft but the send failed.
+`UPCOMING`, then `PENDING` when the scan finds it due, then `SENDING` while one approval talks to PayPal, then `SENT`. Approval claims the item by moving it from `PENDING` to `SENDING` in one conditional update, so a second approval at the same moment gets a 409. A failed send puts it back to `PENDING`, and so does a restart that finds it `SENDING`. It can also end `REJECTED` (skipped) or `CANCELLED` (its schedule was cancelled). `invoice_id` links the invoice it became. It is set before `SENT` if PayPal created the draft but the send failed.
 
 ### Risk comparison
 

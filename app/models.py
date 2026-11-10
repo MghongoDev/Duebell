@@ -70,6 +70,8 @@ class ScheduleStatus(StrEnum):
 class ScheduledInvoiceStatus(StrEnum):
     UPCOMING = "UPCOMING"
     PENDING = "PENDING"
+    # Claimed by one approval while it talks to PayPal (issue #39).
+    SENDING = "SENDING"
     SENT = "SENT"
     REJECTED = "REJECTED"
     CANCELLED = "CANCELLED"

@@ -27,6 +27,10 @@
     <p>Fill the fields, then confirm before anything reaches PayPal.</p>
   </div>
 
+  {% if notice %}
+  <div class="alert" role="status">{{ notice }}</div>
+  {% endif %}
+
   {% if errors %}
   <div class="alert" role="alert">
     <strong>Check these fields:</strong>
