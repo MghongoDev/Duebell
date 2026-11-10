@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlmodel import Session
 
+from app.paypal import WEBHOOKS_OFF
 from app.routes.common import MAX_WEBHOOK_BYTES, get_session
 from app.services import handle_webhook
 
@@ -30,5 +31,10 @@ async def paypal_webhook(request: Request, session: Session = Depends(get_sessio
         dict(request.headers),
         body,
     )
-    status_code = 200 if result.get("ok") else 400
+    if result.get("ok"):
+        status_code = 200
+    elif result.get("error") == WEBHOOKS_OFF:
+        status_code = 401  # mock mode with MOCK_WEBHOOKS off (issue #38)
+    else:
+        status_code = 400
     return JSONResponse(result, status_code=status_code)

@@ -17,7 +17,7 @@ from sqlmodel import Session, select
 from app.config import Settings
 from app.models import Client, Event, Invoice, InvoiceStatus, Reminder, ReminderStatus, utcnow
 from app.ownership import Scope, get_owned, owned
-from app.paypal import PayPalError, PayPalGateway, PayPalTimeout
+from app.paypal import WEBHOOKS_OFF, PayPalError, PayPalGateway, PayPalTimeout
 from app.risk import HistoryInvoice, RiskAssessment, score_invoice
 from app.validation import InvoiceProposal, proposal_to_cents
 
@@ -361,6 +361,9 @@ def simulate_payment(session: Session, invoice: Invoice, gateway) -> Invoice:
 
 
 def handle_webhook(session: Session, gateway, headers: Mapping[str, str], body: str) -> dict:
+    if not gateway.accepts_webhooks:
+        # Mock mode with MOCK_WEBHOOKS off: refuse and store nothing (issue #38).
+        return {"ok": False, "error": WEBHOOKS_OFF}
     if not gateway.verify_webhook(headers, body):
         return {"ok": False, "error": "invalid signature"}
 
