@@ -33,7 +33,7 @@ Duebell records each channel the moment it succeeds. If email then fails, the re
 
 ## Never sending twice
 
-Four failures could each lead to a duplicate. Duebell handles each one differently.
+Five failures could each lead to a duplicate. Duebell handles each one differently.
 
 | Failure | What could go wrong | What Duebell does |
 | --- | --- | --- |
@@ -41,8 +41,9 @@ Four failures could each lead to a duplicate. Duebell handles each one different
 | Email fails after PayPal sent the reminder | A retry reminds through PayPal again. | `sent_channels` records PayPal, and the retry skips it. |
 | A PayPal call times out | PayPal may have acted, or may still act. A retry sends again. | It counts the PayPal reminder or invoice as sent and warns the user to check PayPal. |
 | PayPal sends the reminder, then Duebell fails to save that | A retry reminds through PayPal again. | Duebell saves `paypal_attempted_at` before it calls PayPal. The retry finds it, counts the PayPal reminder as sent, and warns the user to check PayPal. If PayPal refused the call, Duebell clears it, so the retry sends through PayPal. |
+| The mail server takes the email, but its answer is lost | A retry emails the client again. | Duebell saves `email_attempted_at` before it hands the email over. If the connection fails, the login fails, the server refuses the sender or recipient, or it rejects the message, nothing went out: Duebell clears the attempt and a retry sends the email. Once the message itself has gone out, any other failure, such as a timeout while waiting for the server's answer, counts the email as sent and warns the user to check their sent mail. A retry that finds the attempt does the same. |
 
-The last two cases trade one possible missed reminder for no duplicate. A duplicate reaches the client. A missed one shows up when the user checks PayPal, and they can remind from there. Duebell will not draft another reminder for that invoice in the same stage, because it counts this one as sent.
+The last three cases trade one possible missed reminder for no duplicate. A duplicate reaches the client. A missed one shows up when the user checks PayPal or their sent mail, and they can remind from there. Duebell will not draft another reminder for that invoice in the same stage, because it counts this one as sent.
 
 ### Retries inside one call
 
