@@ -92,5 +92,5 @@ These are constants in the code, not settings.
 | Repeats | 1 to 60, or no end |
 | Session length | 12 hours |
 | Sign-in attempts before a lockout | 5 within 15 minutes, counted before the password check. A correct password clears the count. |
-| Emails the lockout tracks | 10,000. Entries expire after 15 minutes. |
+| Emails the lockout tracks | 10,000. Entries expire after 15 minutes. A locked email is never dropped; while every entry is locked, a new email is refused. |
 | Retries for sandbox PayPal calls and model calls | 3 attempts, exponential backoff. Toolkit calls do not retry. |
