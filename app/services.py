@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select
+from sqlmodel import Session, select, update
 
 from app.config import Settings
 from app.currency import format_amount
@@ -289,19 +289,23 @@ def send_unsent_invoice(
 
     A timeout counts as sent, with a warning: PayPal may still act, and sending
     again could bill the client twice (issue #39, as reminders do under ADR 0003).
+    A status a webhook stored during the call stays if SENT may not replace
+    it, and then no warning is given (issue #115).
     """
     if invoice.status != InvoiceStatus.DRAFT or not invoice.paypal_invoice_id:
         raise ValueError("Only an invoice PayPal holds unsent can be sent this way.")
+    timed_out = False
     try:
         gateway.send_invoice(invoice.paypal_invoice_id)
     except PayPalTimeout:
-        if warnings is not None:
-            warnings.append(SEND_UNCONFIRMED)
+        timed_out = True
     except PayPalError as exc:
         session.refresh(invoice)
         raise InvoiceNotSent(str(exc), invoice) from exc
-    invoice.status = InvoiceStatus.SENT
-    session.add(invoice)
+    # A webhook may have paid or cancelled the invoice during the call; that
+    # status stays, with no warning (issue #115).
+    if move_status(session, invoice, InvoiceStatus.SENT) and timed_out and warnings is not None:
+        warnings.append(SEND_UNCONFIRMED)
     session.commit()
     session.refresh(invoice)
     return invoice
@@ -466,6 +470,25 @@ def apply_status(invoice: Invoice, status: str) -> None:
         invoice.repeat_cycles = None
 
 
+def move_status(session: Session, invoice: Invoice, status: str) -> bool:
+    """Apply status if it may replace the one stored now. The caller commits (issue #115).
+
+    A PayPal call can take seconds, and a webhook may commit a newer status
+    meanwhile, so the status read before the call may be out of date. The
+    no-op update takes SQLite's write lock first, then the invoice is read
+    again, so may_replace sees the stored status and nothing changes it before
+    the caller commits. Returns whether the status changed.
+    """
+    session.exec(update(Invoice).where(Invoice.id == invoice.id).values(status=Invoice.status))
+    session.refresh(invoice)
+    if not may_replace(invoice.status, status):
+        return False
+    changed = invoice.status != status
+    apply_status(invoice, status)
+    session.add(invoice)
+    return changed
+
+
 def follow_sent_invoice(session: Session, invoice: Invoice) -> None:
     """Follow up this invoice if PayPal has sent it (issues #78, #79).
 
@@ -501,12 +524,11 @@ def reject_drafts_if_closed(session: Session, invoice: Invoice) -> int:
 
 
 def refresh_invoice(session: Session, invoice: Invoice, gateway) -> Invoice:
+    """Read the status from PayPal and apply it if it still moves forward (issues #37, #115)."""
     if not invoice.paypal_invoice_id:
         return invoice
     status = gateway.get_invoice(invoice.paypal_invoice_id)
-    if may_replace(invoice.status, status):
-        apply_status(invoice, status)
-    session.add(invoice)
+    move_status(session, invoice, status)
     reject_drafts_if_closed(session, invoice)
     session.commit()
     session.refresh(invoice)
@@ -515,13 +537,13 @@ def refresh_invoice(session: Session, invoice: Invoice, gateway) -> Invoice:
 
 
 def simulate_payment(session: Session, invoice: Invoice, gateway) -> Invoice:
+    """Record a payment in PayPal, then mark the invoice PAID if it still may be (issue #115)."""
     if not invoice.paypal_invoice_id:
         raise ValueError("Invoice has no PayPal id yet.")
     if invoice.status in CLOSED_STATUSES:
         raise ValueError("This invoice is already closed.")
     gateway.record_payment(invoice.paypal_invoice_id, invoice.amount_cents, invoice.currency)
-    apply_status(invoice, InvoiceStatus.PAID)
-    session.add(invoice)
+    move_status(session, invoice, InvoiceStatus.PAID)
     reject_drafts_if_closed(session, invoice)
     session.commit()
     session.refresh(invoice)

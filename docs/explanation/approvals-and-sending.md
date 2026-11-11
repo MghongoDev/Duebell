@@ -25,6 +25,8 @@ Approving a reminder claims the draft before anything is sent, the same way a sc
 
 Two copies of one PayPal webhook can arrive at the same moment. The webhook stores the event before it reads the invoice. The second copy waits for the first, finds the event ID taken, and counts as a duplicate. An event for the same invoice also waits, so the forward-only rule always compares against the latest status.
 
+A PayPal call can take seconds, and a webhook can land during it. **Send**, **Refresh** and **Simulate payment** read the invoice again once PayPal answers, holding the database's write lock, and apply their status only if it still moves the invoice forward. A webhook that marks an invoice paid while it is being sent leaves it paid, not sent. A send that timed out warns only if it is the one that marked the invoice sent.
+
 ## Channels
 
 When approving a reminder, the user picks a [channel](../../GLOSSARY.md): PayPal, email, or both. PayPal goes first.
@@ -33,7 +35,7 @@ Duebell records each channel the moment it succeeds. If email then fails, the re
 
 ## Never sending twice
 
-Four failures could each lead to a duplicate. Duebell handles each one differently.
+Five failures could each lead to a duplicate. Duebell handles each one differently.
 
 | Failure | What could go wrong | What Duebell does |
 | --- | --- | --- |
@@ -41,8 +43,9 @@ Four failures could each lead to a duplicate. Duebell handles each one different
 | Email fails after PayPal sent the reminder | A retry reminds through PayPal again. | `sent_channels` records PayPal, and the retry skips it. |
 | A PayPal call times out | PayPal may have acted, or may still act. A retry sends again. | It counts the PayPal reminder or invoice as sent and warns the user to check PayPal. |
 | PayPal sends the reminder, then Duebell fails to save that | A retry reminds through PayPal again. | Duebell saves `paypal_attempted_at` before it calls PayPal. The retry finds it, counts the PayPal reminder as sent, and warns the user to check PayPal. If PayPal refused the call, Duebell clears it, so the retry sends through PayPal. |
+| The mail server takes the email, but its answer is lost | A retry emails the client again. | Duebell saves `email_attempted_at` before it hands the email over. If the connection fails, the login fails, the server refuses the sender or recipient, or it rejects the message, nothing went out: Duebell clears the attempt and a retry sends the email. Once the message itself has gone out, any other failure, such as a timeout while waiting for the server's answer, counts the email as sent and warns the user to check their sent mail. A retry that finds the attempt does the same. |
 
-The last two cases trade one possible missed reminder for no duplicate. A duplicate reaches the client. A missed one shows up when the user checks PayPal, and they can remind from there. Duebell will not draft another reminder for that invoice in the same stage, because it counts this one as sent.
+The last three cases trade one possible missed reminder for no duplicate. A duplicate reaches the client. A missed one shows up when the user checks PayPal or their sent mail, and they can remind from there. Duebell will not draft another reminder for that invoice in the same stage, because it counts this one as sent.
 
 ### Retries inside one call
 
@@ -67,6 +70,6 @@ A scheduled invoice and the invoice it is linked to never disagree. Approval cou
 
 An approval claims the item before it calls PayPal, so a double click or a second tab cannot bill the client twice. If PayPal does not confirm a send in time, Duebell counts the invoice as sent and warns you to check PayPal, the same rule it applies to reminders. Sending again could bill the client twice; counting it as sent risks only an invoice you have to send by hand.
 
-Skipping one leaves the repeat running. Skipping is refused while PayPal holds the linked draft unsent, since **Send** on its invoice row could still bill the client: send it there, or cancel it in PayPal and refresh it, then skip. Duebell does not cancel the draft for you, because it never cancels anything in PayPal. Skipping is refused too once PayPal has sent the linked invoice; approve it to record it. A linked draft PayPal never took, left by a restart before PayPal created it, could never be sent, so skipping deletes it. Cancelling the schedule cancels everything upcoming or pending, and any item an approval is sending, and leaves sent invoices alone. It deletes a pending item's linked draft that PayPal never took. A draft of an item an approval is sending is left to that approval, which deletes it if PayPal refuses it. Approval is refused for an item whose schedule is not active, and the pending list shows only active schedules' items. If the schedule is cancelled while an approval waits on PayPal and PayPal fails, the item stays cancelled: the failure puts an item back to pending only if it is still being sent. A draft PayPal never took is deleted. A draft PayPal holds but did not send stays in the invoice list, where you can send it or leave it. If PayPal succeeds, the item is marked sent, since the client has the invoice. A schedule stays active, and can be cancelled, until its last invoice is approved or skipped.
+Skipping one leaves the repeat running. Skipping is refused while PayPal holds the linked draft unsent, since **Send** on its invoice row could still bill the client: send it there, or cancel it in PayPal and refresh it, then skip. Duebell does not cancel the draft for you, because it never cancels anything in PayPal. Skipping is refused too once PayPal has sent the linked invoice; approve it to record it. A linked draft PayPal never took, left by a restart before PayPal created it, could never be sent, so skipping deletes it. Skip moves the item from `PENDING` to `REJECTED` with one conditional update. If an approval or a **Send** claimed it after Skip read it, nothing changes, Skip answers `409`, and the item ends as that approval leaves it. Cancelling the schedule cancels everything upcoming or pending, and any item an approval is sending, and leaves sent invoices alone. Each item is cancelled with one conditional update on the status Cancel read, so an item an approval marks sent meanwhile stays sent. It deletes a pending item's linked draft that PayPal never took. A draft of an item an approval is sending is left to that approval, which deletes it if PayPal refuses it. Approval is refused for an item whose schedule is not active, and the pending list shows only active schedules' items. If the schedule is cancelled while an approval waits on PayPal and PayPal fails, the item stays cancelled: the failure puts an item back to pending only if it is still being sent. A draft PayPal never took is deleted. A draft PayPal holds but did not send stays in the invoice list, where you can send it or leave it. If PayPal succeeds, the item is marked sent, since the client has the invoice. A schedule stays active, and can be cancelled, until its last invoice is approved or skipped.
 
 The form offers an instalment plan only when the invoice scores High. The server checks the same rule. A plan sends nothing until the user approves its first instalment.

@@ -506,7 +506,70 @@ def test_an_over_long_password_is_refused_without_hashing(app, monkeypatch):
     assert response.status_code == 401
     assert "do not match" in response.text
     assert calls == []
-    assert len(app.state.lockout) == 1
+    assert len(app.state.lockout) == 0
+
+
+# A full table of locked emails (issue #122).
+
+
+def lock(lockout, email):
+    for _ in range(MAX_FAILURES):
+        assert lockout.attempt(email)
+    assert not lockout.attempt(email)
+
+
+def test_a_full_table_of_locked_emails_keeps_the_victim_locked_and_refuses_new_emails(monkeypatch):
+    clock = [1_000_000.0]
+    monkeypatch.setattr(auth.time, "time", lambda: clock[0])
+    lockout = Lockout(max_entries=3)
+    lock(lockout, "victim@duebell.test")
+    clock[0] += 1
+    for index in range(2):
+        lock(lockout, f"junk{index}@duebell.test")
+    assert len(lockout) == 3
+    for index in range(2, 10):
+        assert not lockout.attempt(f"junk{index}@duebell.test")
+    assert len(lockout) == 3
+    assert not lockout.attempt("victim@duebell.test")
+    # Once the window has passed, the sweep frees the table.
+    clock[0] += LOCKOUT_SECONDS
+    assert lockout.attempt("fresh@duebell.test")
+    assert lockout.attempt("victim@duebell.test")
+
+
+def test_a_locked_victim_stays_locked_through_a_flood_of_over_long_passwords(tmp_path):
+    engine = make_engine(f"sqlite:///{tmp_path / 'flood.db'}")
+    init_db(engine)
+    lockout = Lockout(max_entries=3)
+    with Session(engine) as session:
+        create_user(session, "victim@duebell.test", PASSWORD)
+        for index in range(MAX_FAILURES):
+            with pytest.raises(AuthError, match="do not match"):
+                authenticate(session, "victim@duebell.test", f"guess-{index}", lockout)
+        for index in range(5):
+            for _ in range(MAX_FAILURES + 1):
+                with pytest.raises(AuthError, match="do not match"):
+                    authenticate(session, f"junk{index}@duebell.test", "A" * 2000, lockout)
+        assert len(lockout) == 1
+        with pytest.raises(AuthError, match="Too many failed attempts"):
+            authenticate(session, "victim@duebell.test", PASSWORD, lockout)
+
+
+def test_a_full_table_refuses_a_new_email_at_sign_in_without_storing_it(monkeypatch, tmp_path):
+    engine = make_engine(f"sqlite:///{tmp_path / 'full.db'}")
+    init_db(engine)
+    clock = [1_000_000.0]
+    monkeypatch.setattr(auth.time, "time", lambda: clock[0])
+    lockout = Lockout(max_entries=2)
+    for index in range(2):
+        lock(lockout, f"junk{index}@duebell.test")
+    with Session(engine) as session:
+        create_user(session, "owner@duebell.test", PASSWORD)
+        with pytest.raises(AuthError, match="Too many failed attempts"):
+            authenticate(session, "owner@duebell.test", PASSWORD, lockout)
+        assert len(lockout) == 2
+        clock[0] += LOCKOUT_SECONDS
+        assert authenticate(session, "owner@duebell.test", PASSWORD, lockout).email == "owner@duebell.test"
 
 
 def test_create_user_refuses_a_password_sign_in_would_refuse(app):
