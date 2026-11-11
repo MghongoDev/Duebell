@@ -25,6 +25,8 @@ Approving a reminder claims the draft before anything is sent, the same way a sc
 
 Two copies of one PayPal webhook can arrive at the same moment. The webhook stores the event before it reads the invoice. The second copy waits for the first, finds the event ID taken, and counts as a duplicate. An event for the same invoice also waits, so the forward-only rule always compares against the latest status.
 
+A PayPal call can take seconds, and a webhook can land during it. **Send**, **Refresh** and **Simulate payment** read the invoice again once PayPal answers, holding the database's write lock, and apply their status only if it still moves the invoice forward. A webhook that marks an invoice paid while it is being sent leaves it paid, not sent. A send that timed out warns only if it is the one that marked the invoice sent.
+
 ## Channels
 
 When approving a reminder, the user picks a [channel](../../GLOSSARY.md): PayPal, email, or both. PayPal goes first.
