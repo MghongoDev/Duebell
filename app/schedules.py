@@ -553,8 +553,8 @@ def approve_scheduled(
     PayPal if PayPal does not hold it yet, sends it if PayPal holds it unsent,
     and marks the item sent if PayPal has sent it (issue #74).
 
-    A linked invoice counts as sent only in a sent status (SENT, OVERDUE or
-    paid). If it was cancelled or refunded before it was sent, the client was
+    A linked invoice counts as sent only in a sent status (SENT, OVERDUE, a
+    partial status (issue #112) or paid). If it was cancelled or refunded before it was sent, the client was
     never billed for this item, so the item is unlinked from it and a new
     invoice is drafted and sent in its place (issue #79).
 
