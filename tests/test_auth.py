@@ -22,7 +22,7 @@ from app.auth import (
     read_session_cookie,
 )
 from app.models import Client, Event, Invoice, Reminder, Schedule, ScheduledInvoice, User, init_db, make_engine
-from app.web import create_app
+from app.web import PUBLIC_PATHS, create_app
 from scripts.create_user import claim_ownerless
 from tests.conftest import PASSWORD, add_late_payer, sign_in
 
@@ -35,17 +35,17 @@ FORM = {
     "terms_days": "2",
 }
 
-PUBLIC = {"/login", "/healthz", "/webhooks/paypal", "/static", "/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
-
 
 def test_every_private_route_turns_away_an_anonymous_request(app):
+    """Only the app's own public paths are skipped, so the schema route is checked too (issue #124)."""
     from app.web import ROUTERS
 
     anonymous = TestClient(app)
     checked = set()
     for route in app.routes:
+        # The /static mount has no methods, so the loop below skips it.
         path = getattr(route, "path", "")
-        if path in PUBLIC or path.startswith("/static"):
+        if path in PUBLIC_PATHS:
             continue
         url = path.replace("{invoice_id}", "1").replace("{reminder_id}", "1")
         url = url.replace("{item_id}", "1").replace("{schedule_id}", "1")
@@ -65,9 +65,10 @@ def test_every_private_route_turns_away_an_anonymous_request(app):
         for module in ROUTERS
         for route in module.router.routes
         for method in route.methods - {"HEAD"}
-        if route.path not in PUBLIC
+        if route.path not in PUBLIC_PATHS
     }
-    assert declared and checked == declared
+    # FastAPI adds the schema route itself; it needs sign-in too (issue #124).
+    assert declared and checked == declared | {("GET", "/openapi.json")}
 
 
 def test_public_routes_stay_open(app):
@@ -75,6 +76,20 @@ def test_public_routes_stay_open(app):
     assert anonymous.get("/healthz").status_code == 200
     assert anonymous.get("/login").status_code == 200
     assert anonymous.get("/static/styles.css").status_code == 200
+
+
+def test_docs_pages_are_off_and_the_schema_needs_sign_in(app):
+    """Swagger UI and ReDoc need a CDN and an inline script the CSP blocks (issue #124)."""
+    anonymous = TestClient(app)
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        response = anonymous.get(path, follow_redirects=False)
+        assert response.status_code == 303 and response.headers["location"] == "/login", path
+    signed_in = sign_in(TestClient(app))
+    assert signed_in.get("/docs").status_code == 404
+    assert signed_in.get("/redoc").status_code == 404
+    schema = signed_in.get("/openapi.json")
+    assert schema.status_code == 200
+    assert "/invoices" in schema.json()["paths"]
 
 
 def test_wrong_password_is_refused_and_repeated_failures_lock(app):

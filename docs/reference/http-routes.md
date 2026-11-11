@@ -4,7 +4,7 @@ Every route needs a signed-in user except the five public paths: `/login`, `/log
 
 Each route acts only on the signed-in user's records. Another user's record gets the same `404` as a missing one.
 
-Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true` or `"ok": false` with an `"error"` message. FastAPI's generated schema is at `/docs` once you sign in.
+Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true` or `"ok": false` with an `"error"` message. FastAPI's generated OpenAPI schema is at `GET /openapi.json` once you sign in. Without a session it redirects to `/login` like any page. The Swagger UI (`/docs`) and ReDoc (`/redoc`) pages are turned off, because they load scripts from a CDN that the content security policy blocks; load the schema into a viewer of your own instead.
 
 ## Pages and sign-in
 
