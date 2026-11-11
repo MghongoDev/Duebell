@@ -44,3 +44,7 @@ The same review moved the Render start command from a full reset to `scripts/see
 ## Revision, 2026-11-10
 
 The note above says the `--if-empty` start command lets a restart keep data. That holds only on a persistent disk. The blueprint runs on Render's free plan, which has no disk: the SQLite file is lost at each deploy, restart and spin-down after 15 idle minutes, and the next start seeds a fresh demo. A persistent disk needs a paid instance type. `--if-empty` still keeps data on such a disk, and `--require-password` still applies everywhere (issue #87).
+
+## Revision, 2026-11-11
+
+The decision above names four public paths. Since issue #84 there is a fifth: `POST /logout`. It only clears the session cookie and redirects to sign-in, so it reads and changes no records. It is public so that a person whose session has expired can still sign out.

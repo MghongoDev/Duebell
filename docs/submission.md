@@ -36,7 +36,8 @@ A freelancer finishes the work, sends the invoice, and then has to remember to c
 
 ## Evidence
 
-- `pytest`: 143 tests pass, with no network or credentials.
+- `pytest`: the full test suite passes in CI on Python 3.12 and 3.15, with no network or credentials.
+- A hand run on 11 November 2026 checked sandbox and toolkit modes against the PayPal sandbox, with webhooks through a public URL (#32). PayPal accepted the due date Duebell sends. Creating and sending invoices, reminders, payments by the sandbox buyer, webhooks, simulated payments and Refresh all worked, and a retried create left one invoice in PayPal.
 - Live evals on 3 November 2026: parse 10 of 10 cases exact with 50 of 50 fields correct, reminders 10 of 10, webhook pass.
 - `scripts/smoke.py`: three full demo runs from a fresh database, through the HTTP routes: sign in, parse, create, scan, approve the reminder, simulate payment, replay the webhook, refresh.
 - The dashboard screenshot in the README comes from the seeded mock mode.
@@ -47,7 +48,7 @@ Python 3.12+, FastAPI, Jinja2, HTMX, AG Grid Community, SQLModel, SQLite, APSche
 
 ## Challenges
 
-- PayPal sandbox Invoicing calls returned `403 NOT_AUTHORIZED` during development even after the Invoicing feature was enabled. The mock gateway keeps the demo reproducible. The sandbox gateway is wired, and its request payloads are tested without a network call.
+- PayPal sandbox Invoicing calls returned `403 NOT_AUTHORIZED` during development even after the Invoicing feature was enabled. The mock gateway keeps the demo reproducible. The sandbox gateway is wired, and its request payloads are tested without a network call. The hand run on 11 November 2026 then worked against the sandbox (see Evidence).
 - The model can return a plausible wrong value. The fix was to make the model a form filler, not an agent, and to keep the manual form as the fallback.
 - Reminder tone is a judgement call. The app uses a small, visible rule and shows the whole draft before approval.
 
