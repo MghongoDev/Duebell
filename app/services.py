@@ -525,14 +525,30 @@ def refresh_invoice(session: Session, invoice: Invoice, gateway) -> Invoice:
     return invoice
 
 
+# The event type of the feed line a simulated payment leaves (issue #125).
+# PayPal's own event types read INVOICING.INVOICE.*, so the two never mix.
+SIMULATED_PAYMENT = "Simulated payment"
+
+
 def simulate_payment(session: Session, invoice: Invoice, gateway) -> Invoice:
-    """Record a payment in PayPal, then mark the invoice PAID if it still may be (issue #115)."""
+    """Record a payment in PayPal, then mark the invoice PAID if it still may be (issue #115).
+
+    The payment also adds a line to the owner's activity feed: a local Event
+    whose ID starts with SIMULATED-, not a PayPal webhook event (issue #125).
+    """
     if not invoice.paypal_invoice_id:
         raise ValueError("Invoice has no PayPal id yet.")
     if invoice.status in CLOSED_STATUSES:
         raise ValueError("This invoice is already closed.")
     gateway.record_payment(invoice.paypal_invoice_id, invoice.amount_cents, invoice.currency)
     move_status(session, invoice, InvoiceStatus.PAID)
+    session.add(
+        Event(
+            paypal_event_id=f"SIMULATED-{invoice.invoice_number}-{uuid4().hex[:8].upper()}",
+            user_id=invoice.user_id,
+            event_type=SIMULATED_PAYMENT,
+        )
+    )
     reject_drafts_if_closed(session, invoice)
     session.commit()
     session.refresh(invoice)

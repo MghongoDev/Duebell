@@ -219,6 +219,7 @@
     <select id="grid-status" aria-label="Filter by status">
       <option value="">All statuses</option>
       <option value="SENT">Sent</option>
+      <option value="OVERDUE">Overdue</option>
       <option value="PAYMENT_PENDING">Payment pending</option>
       <option value="PARTIALLY_PAID">Partly paid</option>
       <option value="PARTIALLY_REFUNDED">Partly refunded</option>
@@ -270,7 +271,7 @@
 <section class="panel">
   <div class="panel-head">
     <h2>Activity</h2>
-    <p>PayPal events and sent reminders.</p>
+    <p>PayPal events, simulated payments and sent reminders.</p>
   </div>
   {% if events %}
   <ul class="activity">

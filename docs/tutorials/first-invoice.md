@@ -64,7 +64,7 @@ Nothing has been sent. Change the text if you like and click **Save draft**. Lea
 
 ## 7. Record the payment
 
-In the invoice's row, click **Simulate payment**. The status becomes `PAID`, the Collected total rises, and Acme Studio's next invoice will count this payment in its history.
+In the invoice's row, click **Simulate payment**. The status becomes `PAID`, the Collected total rises, the activity feed adds a "Simulated payment" line, and Acme Studio's next invoice will count this payment in its history. The seeded invoices never reached PayPal, so their rows have no **Simulate payment** or **Refresh**.
 
 ## What you did
 

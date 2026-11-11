@@ -19,7 +19,7 @@ If the model endpoint is unavailable, fill the form manually and say that the ma
 
 ### 0:00 to 0:20: The problem
 
-Show the dashboard.
+Show the dashboard. Pick "Overdue" in the status filter to show the late invoices, then set it back to "All statuses".
 
 > Freelancers send the invoice and then have to chase it. The chase is awkward, easy to postpone, and easy to get wrong. Duebell handles the follow-up, but never sends a reminder without you.
 
@@ -49,7 +49,7 @@ Click "Approve and send".
 
 ### 1:50 to 2:15: Payment sync
 
-Click "Simulate payment". Show the status change and the activity feed.
+Click "Simulate payment" on the new row. Show the status change to `PAID` and the "Simulated payment" line at the top of the activity feed. The seeded invoices have no PayPal ID, so their rows show no "Simulate payment" or "Refresh".
 
 > In sandbox, a signed webhook does this. Events are stored once by PayPal's event id, so a replay changes nothing. A manual refresh covers a missed webhook.
 
