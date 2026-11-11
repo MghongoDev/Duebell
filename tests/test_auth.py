@@ -123,8 +123,8 @@ def test_password_is_stored_hashed(app):
 
 
 def test_session_cookie_is_signed_and_expires():
-    cookie = make_session_cookie("secret", 7)
-    assert read_session_cookie("secret", cookie) == 7
+    cookie = make_session_cookie("secret", 7, "key-7")
+    assert read_session_cookie("secret", cookie) == (7, "key-7")
     assert read_session_cookie("other-secret", cookie) is None
     body, signature = cookie.rsplit(".", 1)
     assert read_session_cookie("secret", body + "." + signature[:-2] + "AA") is None
@@ -142,7 +142,9 @@ def test_sign_out_ends_the_session(client):
 def expired_session(app) -> TestClient:
     """A client holding a session cookie past its 12-hour expiry."""
     signed_in = sign_in(TestClient(app), "expired@duebell.test")
-    cookie = make_session_cookie(app.state.secret_key, signed_in.user_id, now=time.time() - 13 * 3600)
+    with Session(app.state.engine) as session:
+        key = session.get(User, signed_in.user_id).session_key
+    cookie = make_session_cookie(app.state.secret_key, signed_in.user_id, key, now=time.time() - 13 * 3600)
     return TestClient(app, cookies={COOKIE_NAME: cookie})
 
 

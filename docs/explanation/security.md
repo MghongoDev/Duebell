@@ -6,7 +6,10 @@ Duebell is a sandbox demo, but it can be hosted for several people. This page ex
 
 - A middleware turns away every request without a valid session, except five public paths: sign-in, sign-out, `/healthz`, static files and the PayPal webhook. Sign-out is public so an expired session can still sign out; it only clears the cookie. A page or form post without a session redirects to sign-in, and a JSON route answers `401`. It denies by default, so a new route is protected without extra code. A test lists every route and checks this.
 - Duebell hashes passwords with scrypt and a random salt. Each hash records its cost, so the cost can rise later.
-- The session is a cookie holding the user ID and an expiry, signed with `SECRET_KEY`. It is HttpOnly, SameSite=Lax, and Secure when `COOKIE_SECURE=true`. It lasts 12 hours.
+- The session is a cookie holding the user ID, the user's session key and an expiry, signed with `SECRET_KEY`. It is HttpOnly, SameSite=Lax, and Secure when `COOKIE_SECURE=true`. It lasts 12 hours.
+- Each user has a random session key, stored with the user. The middleware accepts a cookie only while its key matches the user's current key. User IDs can repeat: a demo reset empties the tables, and SQLite then gives the next user the ID of a deleted one. The new user has a new key, so a cookie issued to the deleted user does not sign anyone in.
+- Giving a user a new session key signs them out everywhere. Duebell has no button for this yet; a password change flow could do it.
+- A database from an older build has no session keys. On startup Duebell adds the column and gives every user a key. Cookies issued before the upgrade hold no key, so every existing session ends once and each user signs in again.
 - SameSite=Lax also stops other sites from posting forms with the cookie.
 - Sign-in needs no cookie, so it checks the `Origin` header instead. A post whose `Origin` names a host other than the one it was sent to gets `403`, which stops a hostile page from signing a victim into the attacker's account. Duebell allows a post with no `Origin`, since some clients leave it out. The referrer policy is `same-origin`: it sends nothing to other sites, and it lets a browser name its own origin. Under `no-referrer` a browser sends `Origin: null` on every form post, which the check refuses.
 - Five sign-in attempts within 15 minutes lock an email until the oldest is 15 minutes old. Each attempt is counted before its password is checked, so attempts sent at the same moment cannot slip past the limit. A correct password clears the count. An unknown email takes the same time and gets the same message as a wrong password.
@@ -51,7 +54,7 @@ img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors
 
 ## Known gaps
 
-- A session cannot be revoked before it expires, except by changing `SECRET_KEY`, which signs everyone out.
+- Signing a single user out everywhere means giving them a new session key in the database; there is no route or script for it. Changing `SECRET_KEY` signs everyone out.
 - The lockout lives in process memory. A restart clears it.
 - Anyone can keep the demo account locked by sending five wrong passwords every 15 minutes. The lockout counts attempts per email, not per client. Counting per client address would mean trusting the `X-Forwarded-For` header that Render's proxy adds, and any client can forge that header, so an attacker could make unlimited guesses by sending a new address each time. Duebell keeps counting per email.
 - There is no password reset and no email check on new users.
