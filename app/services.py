@@ -10,27 +10,48 @@ from datetime import datetime, timedelta
 from typing import Mapping
 from uuid import uuid4
 
-from sqlalchemy import func
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.config import Settings
 from app.currency import format_amount
-from app.models import Client, Event, Invoice, InvoiceStatus, Reminder, ReminderStatus, as_utc, utcnow
+from app.models import (
+    Client,
+    Event,
+    Invoice,
+    InvoiceStatus,
+    Reminder,
+    ReminderStatus,
+    as_utc,
+    seed_invoice_counter,
+    utcnow,
+)
 from app.ownership import Scope, get_owned, owned
 from app.paypal import WEBHOOKS_OFF, PayPalError, PayPalGateway, PayPalTimeout
 from app.risk import HistoryInvoice, RiskAssessment, score_invoice
 from app.validation import InvoiceProposal, proposal_to_cents
 
-PAID_STATUSES = {InvoiceStatus.PAID, InvoiceStatus.MARKED_AS_PAID}
-CLOSED_STATUSES = PAID_STATUSES | {InvoiceStatus.CANCELLED, InvoiceStatus.REFUNDED}
+# PayPal names several ways to be paid, refunded or cancelled. Duebell stores
+# each as PayPal names it and treats it as its plain form (issue #112).
+PAID_STATUSES = {InvoiceStatus.PAID, InvoiceStatus.MARKED_AS_PAID, InvoiceStatus.PAID_EXTERNAL}
+REFUNDED_STATUSES = {InvoiceStatus.REFUNDED, InvoiceStatus.MARKED_AS_REFUNDED, InvoiceStatus.REFUNDED_EXTERNAL}
+CANCELLED_STATUSES = {InvoiceStatus.CANCELLED, InvoiceStatus.AUTO_CANCELLED}
+CLOSED_STATUSES = PAID_STATUSES | REFUNDED_STATUSES | CANCELLED_STATUSES
 KNOWN_STATUSES = set(InvoiceStatus)
+# PayPal's statuses for a payment pending review, a part payment and a part
+# refund. Each leaves the invoice open (issue #112). Duebell keeps no paid
+# amount, so each counts in full.
+PARTIAL_STATUSES = {InvoiceStatus.PAYMENT_PENDING, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.PARTIALLY_REFUNDED}
+# Sent, not closed, and owed: the outstanding total and the reminder scan
+# count these (issue #112).
+OWED_STATUSES = {InvoiceStatus.SENT, InvoiceStatus.OVERDUE} | PARTIAL_STATUSES
 # The statuses of an invoice PayPal has sent. A repeat held on a draft starts,
 # and a scheduled item linked to it counts as sent, once the draft reaches one
 # of them (issues #78, #79).
-SENT_STATUSES = {InvoiceStatus.SENT, InvoiceStatus.OVERDUE} | PAID_STATUSES
+SENT_STATUSES = OWED_STATUSES | PAID_STATUSES
 # Never part of a client's payment history (issue #46).
-NOT_HISTORY = {InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED}
+NOT_HISTORY = {InvoiceStatus.DRAFT} | CANCELLED_STATUSES
 
 EVENT_STATUS = {
     "INVOICING.INVOICE.SENT": InvoiceStatus.SENT,
@@ -86,13 +107,31 @@ SEND_UNCONFIRMED = (
 
 
 def next_invoice_number(session: Session, offset: int = 0) -> str:
-    """A number above every invoice so far. The unique index settles a tie (issue #39)."""
-    highest = session.exec(select(func.max(Invoice.id))).one() or 0
-    return f"DUE-{utcnow():%Y%m%d}-{highest + 1 + offset:04d}"
+    """Take the next number from the counter, in the open transaction (issues #39, #114).
+
+    The counter only goes up and stays above every invoice id, so a number is
+    never handed out twice, even after its draft is deleted. The update takes
+    SQLite's write lock, so two requests cannot read the same value. The unique
+    index still settles a clash with a number added some other way.
+    """
+    connection = session.connection()
+    bump = text(
+        "UPDATE invoicenumbercounter "
+        "SET last = MAX(last, (SELECT COALESCE(MAX(id), 0) FROM invoice)) + 1 + :offset WHERE id = 1"
+    )
+    if connection.execute(bump, {"offset": offset}).rowcount == 0:
+        seed_invoice_counter(connection)
+        connection.execute(bump, {"offset": offset})
+    last = connection.execute(text("SELECT last FROM invoicenumbercounter WHERE id = 1")).scalar_one()
+    return f"DUE-{utcnow():%Y%m%d}-{last:04d}"
 
 
 def _insert_numbered(session: Session, invoice: Invoice) -> None:
-    """Commit a new invoice, taking the next free number if another request took this one."""
+    """Commit a new invoice with the next number, in the same transaction as the counter.
+
+    If the number is already taken, the rollback undoes the counter too, so
+    the next try skips one more number.
+    """
     for offset in range(NUMBER_ATTEMPTS):
         invoice.invoice_number = next_invoice_number(session, offset)
         session.add(invoice)
@@ -323,11 +362,12 @@ def invoice_rows(session: Session, scope: Scope) -> list[dict]:
 def dashboard_totals(rows: list[dict]) -> dict:
     # Outstanding money owed = invoices that have left draft and are not yet
     # settled. A DRAFT has never been sent, so it is not a debt to collect.
+    # A partly paid or partly refunded invoice counts in full (issue #112).
     # Amounts in different currencies are never added together.
     outstanding = _amount_by_currency(
         row
         for row in rows
-        if row["status"] in {InvoiceStatus.SENT, InvoiceStatus.OVERDUE} and row.get("paypal_invoice_id")
+        if row["status"] in OWED_STATUSES and row.get("paypal_invoice_id")
     )
     paid = _amount_by_currency(row for row in rows if row["status"] in PAID_STATUSES)
     overdue = sum(1 for row in rows if row["overdue"])
@@ -380,15 +420,28 @@ def may_replace(current: str, new: str) -> bool:
     """Whether status new may replace status current (issue #37).
 
     A status only moves forward. It never leaves a closed status, except that
-    a paid invoice may become refunded, and it never goes back to DRAFT. A
-    status Duebell does not know, such as the gateway's UNKNOWN, never applies.
+    a paid invoice may become partly or fully refunded, and it never goes back
+    to DRAFT. A status Duebell does not know, such as the gateway's UNKNOWN,
+    never applies.
+
+    Partial statuses keep their order (issue #112). Money in moves
+    SENT -> PARTIALLY_PAID -> PAID, so a partly paid invoice never goes back
+    to SENT or OVERDUE. PAYMENT_PENDING may sit before or after a part
+    payment, and may go back to SENT if the payment fails. Money out moves
+    PAID -> PARTIALLY_REFUNDED -> REFUNDED, so a partly refunded invoice may
+    only become refunded. Each paid and refunded status stands for all of
+    PayPal's names for it.
     """
     if new not in KNOWN_STATUSES:
         return False
     if new == current:
         return True
     if current in CLOSED_STATUSES:
-        return current in PAID_STATUSES and new == InvoiceStatus.REFUNDED
+        return current in PAID_STATUSES and new in REFUNDED_STATUSES | {InvoiceStatus.PARTIALLY_REFUNDED}
+    if current == InvoiceStatus.PARTIALLY_REFUNDED:
+        return new in REFUNDED_STATUSES
+    if current == InvoiceStatus.PARTIALLY_PAID:
+        return new not in {InvoiceStatus.DRAFT, InvoiceStatus.SENT, InvoiceStatus.OVERDUE}
     return new != InvoiceStatus.DRAFT
 
 
@@ -500,8 +553,12 @@ def handle_webhook(session: Session, gateway, headers: Mapping[str, str], body: 
         return {"ok": True, "duplicate": True}
 
     resource = payload.get("resource") or {}
-    paypal_invoice_id = resource.get("id") or (resource.get("invoice") or {}).get("id") or ""
-    status = EVENT_STATUS.get(event_type)
+    carried = resource if resource.get("id") else resource.get("invoice") or {}
+    paypal_invoice_id = carried.get("id") or ""
+    # PAID also covers a part payment or a pending one, and REFUNDED a part
+    # refund, so the invoice's own status wins. The event type only names the
+    # status when the invoice carries none (issue #112).
+    status = carried.get("status") or EVENT_STATUS.get(event_type)
     applied = False
     owner_id = None
     invoice = find_by_paypal_id(session, paypal_invoice_id) if paypal_invoice_id else None

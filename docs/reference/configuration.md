@@ -1,6 +1,6 @@
 # Configuration
 
-Duebell reads its settings from environment variables when it starts. It also loads a `.env` file from the working directory. `.env.example` lists every name, and git ignores `.env`.
+Duebell reads its settings from environment variables when it starts. It also loads `.env` from the working directory, the folder you run the command from. It does not look in parent folders, so run commands from the repository root. Variables already set in the environment win over `.env`. A relative `DATABASE_URL`, such as the default, is relative to the same folder. `.env.example` lists every name, and git ignores `.env`.
 
 The defaults run the whole demo with no credentials. A blank value, such as `ANTHROPIC_MODEL=` in `.env.example`, counts as unset, so the default applies.
 

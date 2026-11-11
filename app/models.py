@@ -8,6 +8,7 @@ database keeps working across builds.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Optional
@@ -59,6 +60,15 @@ class InvoiceStatus(StrEnum):
     CANCELLED = "CANCELLED"
     REFUNDED = "REFUNDED"
     OVERDUE = "OVERDUE"
+    # Still open: the client may owe some or all of the amount (issue #112).
+    PAYMENT_PENDING = "PAYMENT_PENDING"
+    PARTIALLY_PAID = "PARTIALLY_PAID"
+    PARTIALLY_REFUNDED = "PARTIALLY_REFUNDED"
+    # Closed: PayPal's other names for paid, refunded and cancelled (issue #112).
+    PAID_EXTERNAL = "PAID_EXTERNAL"
+    MARKED_AS_REFUNDED = "MARKED_AS_REFUNDED"
+    REFUNDED_EXTERNAL = "REFUNDED_EXTERNAL"
+    AUTO_CANCELLED = "AUTO_CANCELLED"
 
 
 class ReminderStatus(StrEnum):
@@ -160,6 +170,17 @@ class Invoice(SQLModel, table=True):
     repeat_unit: Optional[str] = None
     repeat_cycles: Optional[int] = None
     created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+
+
+class InvoiceNumberCounter(SQLModel, table=True):
+    """The last suffix handed out in an invoice number. One row, id 1 (issue #114).
+
+    It only goes up, so a number freed by a deleted draft is never handed out
+    again. PayPal may already hold that number.
+    """
+
+    id: int = Field(default=1, primary_key=True)
+    last: int = 0
 
 
 class Reminder(SQLModel, table=True):
@@ -277,6 +298,30 @@ def init_db(engine) -> None:
     SQLModel.metadata.create_all(engine)
     add_missing_columns(engine)
     sync_indexes(engine)
+    with engine.begin() as connection:
+        seed_invoice_counter(connection)
+
+
+NUMBER_SUFFIX = re.compile(r"-(\d+)$")
+
+
+def seed_invoice_counter(connection) -> None:
+    """Add the counter row if it is missing, above every invoice so far (issue #114).
+
+    It starts at the highest invoice id or the highest numeric suffix of an
+    invoice number, whichever is larger, so a database from an older build
+    never hands out a number it already holds. An existing row is left alone.
+    """
+    if connection.execute(text("SELECT 1 FROM invoicenumbercounter WHERE id = 1")).first():
+        return
+    highest = connection.execute(text("SELECT COALESCE(MAX(id), 0) FROM invoice")).scalar_one()
+    for (number,) in connection.execute(text("SELECT invoice_number FROM invoice")):
+        match = NUMBER_SUFFIX.search(number or "")
+        if match:
+            highest = max(highest, int(match.group(1)))
+    connection.execute(
+        text("INSERT OR IGNORE INTO invoicenumbercounter (id, last) VALUES (1, :last)"), {"last": highest}
+    )
 
 
 def sync_indexes(engine) -> None:

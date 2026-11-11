@@ -15,7 +15,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cp .env.example .env
 .venv/bin/python scripts/reset_demo.py
-.venv/bin/uvicorn app.web:app --reload
+.venv/bin/uvicorn app.main:app --reload
 ```
 
 Open http://127.0.0.1:8000 and sign in as `demo@duebell.test` with `duebell-demo-2026`. Then follow [Your first invoice](docs/tutorials/first-invoice.md).

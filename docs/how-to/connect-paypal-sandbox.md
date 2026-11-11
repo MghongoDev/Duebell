@@ -48,4 +48,4 @@ Toolkit mode sends invoices, sends reminders, records payments and reads status 
 2. Set `PAYPAL_MODE=toolkit`, keeping the sandbox credentials above.
 3. Restart the app.
 
-If the package is missing, the app stops at start with the install command. Toolkit calls do not retry. If one takes longer than `PAYPAL_TIMEOUT_SECONDS`, Duebell treats a reminder as sent and asks you to check PayPal. [Approvals and sending](../explanation/approvals-and-sending.md) explains why.
+If the package is missing, the app stops at start with the install command. Toolkit calls do not retry. If one takes longer than `PAYPAL_TIMEOUT_SECONDS`, Duebell treats the reminder or invoice as sent and asks you to check PayPal, as it does when a sandbox call loses its answer. [Approvals and sending](../explanation/approvals-and-sending.md) explains why.

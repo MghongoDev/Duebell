@@ -8,7 +8,9 @@ from functools import lru_cache
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# .env comes from the working directory only, the same folder a relative
+# DATABASE_URL resolves against. No search of parent folders (issue #120).
+load_dotenv(".env")
 
 
 class ConfigError(ValueError):

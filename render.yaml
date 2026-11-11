@@ -10,7 +10,7 @@ services:
     # restart and spin-down (after 15 idle minutes), and the next start seeds
     # a fresh demo. A persistent disk needs a paid instance type (issue #87).
     # A hosted demo must set its own DEMO_PASSWORD.
-    startCommand: python scripts/seed.py --if-empty --require-password && uvicorn app.web:app --host 0.0.0.0 --port $PORT
+    startCommand: python scripts/seed.py --if-empty --require-password && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION

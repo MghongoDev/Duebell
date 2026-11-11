@@ -4,6 +4,9 @@ Issues #9, #11, #24, #30. The routes live in app.routes, one module per
 area. Every route except the public paths runs as one signed-in user and
 reads through that user's scope (ADR 0008). Sending anything to PayPal or a
 client needs an approval route (ADRs 0003, 0007).
+
+Importing this module builds no app and touches no database. The server
+serves app.main:app, which calls create_app (issue #120).
 """
 
 from __future__ import annotations
@@ -157,5 +160,3 @@ def create_app(
 
     return app
 
-
-app = create_app(scheduler_enabled=True)
