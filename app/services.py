@@ -10,13 +10,23 @@ from datetime import datetime, timedelta
 from typing import Mapping
 from uuid import uuid4
 
-from sqlalchemy import func
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.config import Settings
 from app.currency import format_amount
-from app.models import Client, Event, Invoice, InvoiceStatus, Reminder, ReminderStatus, as_utc, utcnow
+from app.models import (
+    Client,
+    Event,
+    Invoice,
+    InvoiceStatus,
+    Reminder,
+    ReminderStatus,
+    as_utc,
+    seed_invoice_counter,
+    utcnow,
+)
 from app.ownership import Scope, get_owned, owned
 from app.paypal import WEBHOOKS_OFF, PayPalError, PayPalGateway, PayPalTimeout
 from app.risk import HistoryInvoice, RiskAssessment, score_invoice
@@ -86,13 +96,31 @@ SEND_UNCONFIRMED = (
 
 
 def next_invoice_number(session: Session, offset: int = 0) -> str:
-    """A number above every invoice so far. The unique index settles a tie (issue #39)."""
-    highest = session.exec(select(func.max(Invoice.id))).one() or 0
-    return f"DUE-{utcnow():%Y%m%d}-{highest + 1 + offset:04d}"
+    """Take the next number from the counter, in the open transaction (issues #39, #114).
+
+    The counter only goes up and stays above every invoice id, so a number is
+    never handed out twice, even after its draft is deleted. The update takes
+    SQLite's write lock, so two requests cannot read the same value. The unique
+    index still settles a clash with a number added some other way.
+    """
+    connection = session.connection()
+    bump = text(
+        "UPDATE invoicenumbercounter "
+        "SET last = MAX(last, (SELECT COALESCE(MAX(id), 0) FROM invoice)) + 1 + :offset WHERE id = 1"
+    )
+    if connection.execute(bump, {"offset": offset}).rowcount == 0:
+        seed_invoice_counter(connection)
+        connection.execute(bump, {"offset": offset})
+    last = connection.execute(text("SELECT last FROM invoicenumbercounter WHERE id = 1")).scalar_one()
+    return f"DUE-{utcnow():%Y%m%d}-{last:04d}"
 
 
 def _insert_numbered(session: Session, invoice: Invoice) -> None:
-    """Commit a new invoice, taking the next free number if another request took this one."""
+    """Commit a new invoice with the next number, in the same transaction as the counter.
+
+    If the number is already taken, the rollback undoes the counter too, so
+    the next try skips one more number.
+    """
     for offset in range(NUMBER_ATTEMPTS):
         invoice.invoice_number = next_invoice_number(session, offset)
         session.add(invoice)
