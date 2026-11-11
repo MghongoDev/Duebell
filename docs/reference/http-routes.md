@@ -25,7 +25,7 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 | `GET` | `/api/invoices` | The user's invoices as dashboard rows. |
 | `POST` | `/api/invoices/{invoice_id}/refresh` | Reads the status from PayPal and stores it if it moves the invoice forward (see [statuses](data-model.md#invoice)). A sent, overdue or paid invoice starts any Repeat held on it and marks the scheduled invoice linked to it `SENT`. Returns `{"status": ...}` with the stored status. |
 | `POST` | `/api/invoices/{invoice_id}/send` | Sends a `DRAFT` that PayPal already holds, after a failed send. It reuses the PayPal invoice and never creates another. If the form's Repeat was ticked, the first send that succeeds starts the schedule. If the draft is linked to a scheduled invoice, that item is marked `SENT` and its schedule finishes if nothing is left. Returns `status`, and a `warning` if PayPal did not confirm the send in time; the invoice then counts as sent. `409` unless the invoice is a `DRAFT` with a PayPal ID, or while its scheduled invoice is being approved or sent from another tab. While this send runs, an approval of that item gets `409`. `502` if PayPal fails; the invoice stays a draft and its scheduled invoice stays pending. |
-| `POST` | `/api/invoices/{invoice_id}/simulate-payment` | Records a payment through the gateway and marks the invoice `PAID`. `409` if the invoice has no PayPal ID or is already paid, cancelled or refunded. |
+| `POST` | `/api/invoices/{invoice_id}/simulate-payment` | Records a payment through the gateway and marks the invoice `PAID`, unless a webhook closed it during the call. `409` if the invoice has no PayPal ID or is already paid, cancelled or refunded. |
 
 ## Risk
 
