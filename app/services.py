@@ -25,10 +25,17 @@ from app.validation import InvoiceProposal, proposal_to_cents
 PAID_STATUSES = {InvoiceStatus.PAID, InvoiceStatus.MARKED_AS_PAID}
 CLOSED_STATUSES = PAID_STATUSES | {InvoiceStatus.CANCELLED, InvoiceStatus.REFUNDED}
 KNOWN_STATUSES = set(InvoiceStatus)
+# PayPal's statuses for a payment pending review, a part payment and a part
+# refund. Each leaves the invoice open (issue #112). Duebell keeps no paid
+# amount, so each counts in full.
+PARTIAL_STATUSES = {InvoiceStatus.PAYMENT_PENDING, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.PARTIALLY_REFUNDED}
+# Sent, not closed, and owed: the outstanding total and the reminder scan
+# count these (issue #112).
+OWED_STATUSES = {InvoiceStatus.SENT, InvoiceStatus.OVERDUE} | PARTIAL_STATUSES
 # The statuses of an invoice PayPal has sent. A repeat held on a draft starts,
 # and a scheduled item linked to it counts as sent, once the draft reaches one
 # of them (issues #78, #79).
-SENT_STATUSES = {InvoiceStatus.SENT, InvoiceStatus.OVERDUE} | PAID_STATUSES
+SENT_STATUSES = OWED_STATUSES | PAID_STATUSES
 # Never part of a client's payment history (issue #46).
 NOT_HISTORY = {InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED}
 
@@ -322,11 +329,12 @@ def invoice_rows(session: Session, scope: Scope) -> list[dict]:
 def dashboard_totals(rows: list[dict]) -> dict:
     # Outstanding money owed = invoices that have left draft and are not yet
     # settled. A DRAFT has never been sent, so it is not a debt to collect.
+    # A partly paid or partly refunded invoice counts in full (issue #112).
     # Amounts in different currencies are never added together.
     outstanding = _amount_by_currency(
         row
         for row in rows
-        if row["status"] in {InvoiceStatus.SENT, InvoiceStatus.OVERDUE} and row.get("paypal_invoice_id")
+        if row["status"] in OWED_STATUSES and row.get("paypal_invoice_id")
     )
     paid = _amount_by_currency(row for row in rows if row["status"] in PAID_STATUSES)
     overdue = sum(1 for row in rows if row["overdue"])
@@ -379,15 +387,27 @@ def may_replace(current: str, new: str) -> bool:
     """Whether status new may replace status current (issue #37).
 
     A status only moves forward. It never leaves a closed status, except that
-    a paid invoice may become refunded, and it never goes back to DRAFT. A
-    status Duebell does not know, such as the gateway's UNKNOWN, never applies.
+    a paid invoice may become partly or fully refunded, and it never goes back
+    to DRAFT. A status Duebell does not know, such as the gateway's UNKNOWN,
+    never applies.
+
+    Partial statuses keep their order (issue #112). Money in moves
+    SENT -> PARTIALLY_PAID -> PAID, so a partly paid invoice never goes back
+    to SENT or OVERDUE. PAYMENT_PENDING may sit before or after a part
+    payment, and may go back to SENT if the payment fails. Money out moves
+    PAID -> PARTIALLY_REFUNDED -> REFUNDED, so a partly refunded invoice may
+    only become REFUNDED.
     """
     if new not in KNOWN_STATUSES:
         return False
     if new == current:
         return True
     if current in CLOSED_STATUSES:
-        return current in PAID_STATUSES and new == InvoiceStatus.REFUNDED
+        return current in PAID_STATUSES and new in {InvoiceStatus.PARTIALLY_REFUNDED, InvoiceStatus.REFUNDED}
+    if current == InvoiceStatus.PARTIALLY_REFUNDED:
+        return new == InvoiceStatus.REFUNDED
+    if current == InvoiceStatus.PARTIALLY_PAID:
+        return new not in {InvoiceStatus.DRAFT, InvoiceStatus.SENT, InvoiceStatus.OVERDUE}
     return new != InvoiceStatus.DRAFT
 
 
@@ -499,8 +519,12 @@ def handle_webhook(session: Session, gateway, headers: Mapping[str, str], body: 
         return {"ok": True, "duplicate": True}
 
     resource = payload.get("resource") or {}
-    paypal_invoice_id = resource.get("id") or (resource.get("invoice") or {}).get("id") or ""
-    status = EVENT_STATUS.get(event_type)
+    carried = resource if resource.get("id") else resource.get("invoice") or {}
+    paypal_invoice_id = carried.get("id") or ""
+    # PAID also covers a part payment or a pending one, and REFUNDED a part
+    # refund, so the invoice's own status wins. The event type only names the
+    # status when the invoice carries none (issue #112).
+    status = carried.get("status") or EVENT_STATUS.get(event_type)
     applied = False
     owner_id = None
     invoice = find_by_paypal_id(session, paypal_invoice_id) if paypal_invoice_id else None

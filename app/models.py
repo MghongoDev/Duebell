@@ -59,6 +59,10 @@ class InvoiceStatus(StrEnum):
     CANCELLED = "CANCELLED"
     REFUNDED = "REFUNDED"
     OVERDUE = "OVERDUE"
+    # Still open: the client may owe some or all of the amount (issue #112).
+    PAYMENT_PENDING = "PAYMENT_PENDING"
+    PARTIALLY_PAID = "PARTIALLY_PAID"
+    PARTIALLY_REFUNDED = "PARTIALLY_REFUNDED"
 
 
 class ReminderStatus(StrEnum):
