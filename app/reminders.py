@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, or_, select, update
 
 from app.config import Settings
-from app.mailer import Mailer
+from app.mailer import MailError, Mailer, MailMaybeSent
 from app.models import Client, Invoice, InvoiceStatus, Reminder, ReminderStage, ReminderStatus, utcnow
 from app.ownership import Scope, owned
 from app.paypal import PayPalError, PayPalGateway, PayPalTimeout
@@ -251,7 +251,9 @@ def send_reminder(
     the claim is released, the draft is pending again, and a retry skips the
     channels already done, so PayPal never sends the same reminder twice.
     PayPal's attempt is saved before the call, so a retry also skips PayPal
-    when the save after the call failed (issue #75).
+    when the save after the call failed (issue #75). Email works the same way,
+    and a mail server whose answer was lost after it took the message counts
+    as sent (issue #118).
     """
     if reminder.status != ReminderStatus.PENDING:
         raise ValueError("Only a pending draft can be sent.")
@@ -308,7 +310,33 @@ def send_reminder(
         client = session.get(Client, invoice.client_id)
         if client is None:
             raise ValueError("This invoice has no client email.")
-        mailer.send(client.email, subject, reminder.draft_text)
+        if reminder.email_attempted_at is not None:
+            # An earlier approval handed the email to the mail server, then
+            # failed before it could record the result (issue #118).
+            warnings.append(
+                "An earlier approval handed this reminder to the mail server but could not record the result. "
+                "Duebell counts the email as sent so it never goes twice. Check your sent mail."
+            )
+            return
+        # Save the attempt before the send, as PayPal does (issues #75, #118).
+        reminder.email_attempted_at = utcnow()
+        session.add(reminder)
+        session.commit()
+        try:
+            mailer.send(client.email, subject, reminder.draft_text)
+        except MailMaybeSent:
+            # The server may have the message. Counting it as sent risks one
+            # missed email; retrying risks a duplicate to the client.
+            warnings.append(
+                "The mail server did not confirm the reminder email and may still deliver it. "
+                "Duebell counts it as sent so it never goes twice. Check your sent mail."
+            )
+        except MailError:
+            # The server did not take the message. Free email for a retry.
+            reminder.email_attempted_at = None
+            session.add(reminder)
+            session.commit()
+            raise
 
     senders = {Channel.PAYPAL: via_paypal, Channel.EMAIL: via_email}
     if not _claim(session, reminder):
