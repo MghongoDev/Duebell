@@ -50,8 +50,7 @@ Every other setting has a working default. [Configuration](docs/reference/config
 A PayPal AI Hackathon entry, November 2026.
 
 - The full flow works in mock mode. GitHub Actions runs the lint, the tests, the smoke run and the offline evals on Python 3.12 and 3.15 for every push and pull request.
-- A hand run on 11 November 2026 checked sandbox and toolkit modes against the PayPal sandbox, with webhooks through a public URL (#32). PayPal accepted the due date Duebell sends. Creating and sending invoices, reminders, webhooks, simulated payments and **Refresh** all worked, and a retried create left one invoice in PayPal.
-- One gap remains: paying an invoice as the sandbox buyer. The invoice's payment link does not open PayPal's payment page, and **Simulate payment** on that invoice then returns `502`. Use **Simulate payment** on invoices no buyer has tried to pay.
+- A hand run on 11 November 2026 checked sandbox and toolkit modes against the PayPal sandbox, with webhooks through a public URL (#32). PayPal accepted the due date Duebell sends. Creating and sending invoices, reminders, payments by the sandbox buyer, webhooks, simulated payments and **Refresh** all worked, and a retried create left one invoice in PayPal.
 - The last live parsing eval, on 3 November 2026, got 10 of 10 cases and 50 of 50 fields right.
 - The risk weights are set by hand. The training data is synthetic.
 
