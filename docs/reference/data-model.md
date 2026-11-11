@@ -11,6 +11,7 @@ Every table that holds a user's data has a `user_id` ([ADR 0008](../adr/0008-sig
 | `user` | A person who signs in. | `email` (unique), `password_hash` (scrypt, with its cost). |
 | `client` | Someone a user bills. | `name`, `email`. Email is unique per user, so two users may bill the same address. |
 | `invoice` | A request for payment. | `invoice_number`, `paypal_invoice_id`, `amount_cents`, `currency`, `terms_days`, `issued_at`, `due_at`, `paid_at`, `status`, `risk_score`, `risk_level`, `risk_reasons`, `limited_data`, `limited_data_reason`, `repeat_unit`, `repeat_cycles`. The last two hold a Repeat ticked on the form while the invoice waits to be sent, and are cleared when the invoice is sent and the schedule starts, whether **Send**, a webhook or **Refresh** moved it, or when it is cancelled or refunded first. |
+| `invoicenumbercounter` | The counter behind invoice numbers. One row. | `last`, the last number handed out. |
 | `reminder` | A drafted or sent **reminder**. | `invoice_id`, `draft_text`, `tone`, `stage`, `status`, `sent_channels`, `paypal_attempted_at`, `sent_at`. At most one `PENDING` reminder per invoice. |
 | `event` | One PayPal webhook delivery. | `paypal_event_id` (primary key), `event_type`, `payload`. |
 | `schedule` | A **schedule**: a repeat or an **instalment plan**. | `kind`, `client_id`, `amount_cents`, `currency`, `terms_days`, `interval_unit`, `interval_count`, `cycles_left`, `starts_on`, `status`. |
@@ -20,6 +21,10 @@ Every table that holds a user's data has a `user_id` ([ADR 0008](../adr/0008-sig
 Amounts are whole minor units of their currency, despite the `_cents` name: cents for USD, yen for JPY. So 12.50 USD is stored as `1250` and 1000 JPY as `1000`. Times are stored in UTC, and every time column reads back as an aware UTC datetime, whichever sqlmodel version is installed.
 
 An invoice's `due_at` is its `issued_at` plus `terms_days`. Duebell sends PayPal that date as the invoice's `due_date`, so the client sees the same **due date** that reminders and the overdue flag use. Terms of 0 days are sent as due on receipt.
+
+## Invoice numbers
+
+An invoice number looks like `DUE-20261111-0042`: the date it was saved, then a counter. Numbers are shared by all users. The counter in `invoicenumbercounter` only goes up and stays above every invoice id, so Duebell never hands out a number twice, even after it deletes a draft that PayPal refused. That matters because PayPal may have created the invoice and lost its answer: it then holds the number and refuses any later invoice that reuses it. Duebell takes the number in the same transaction that saves the invoice, so two requests at once get different numbers. On a database from an older build, startup adds the counter above the highest invoice id and the highest number at the end of any invoice number. Existing invoice numbers do not change.
 
 ## Statuses
 
