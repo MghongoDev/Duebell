@@ -30,7 +30,7 @@ Sign in as demo@duebell.test. The password is DEMO_PASSWORD, or duebell-demo-202
 ## 3. Start the app and sign in
 
 ```bash
-.venv/bin/uvicorn app.web:app --reload
+.venv/bin/uvicorn app.main:app --reload
 ```
 
 Open http://127.0.0.1:8000. You land on the sign-in page. Sign in as `demo@duebell.test` with `duebell-demo-2026`.
