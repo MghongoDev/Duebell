@@ -1,4 +1,4 @@
-"""The seed script explains a problem instead of crashing (issue #86)."""
+"""The seed script explains a problem instead of crashing (issue #86), and a reset leaves a running app working (issue #121)."""
 
 from __future__ import annotations
 
@@ -6,10 +6,13 @@ import sys
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.models import Client, Invoice, User, make_engine
+from app.web import create_app
+from scripts.seed import DEFAULT_DEMO_PASSWORD, DEMO_EMAIL
 
 
 @pytest.fixture
@@ -120,3 +123,68 @@ def test_reset_requiring_an_unset_password_keeps_the_data(run_seed, monkeypatch,
 
     assert "Set DEMO_PASSWORD" in str(exit_info.value.code)
     assert counts_on_disk(tmp_path) == (1, 6, 26)
+
+
+NEW_PASSWORD = "brand-new-demo-pass"
+INVOICE_FORM = {
+    "client_name": "After Reset Ltd",
+    "client_email": "ap@afterreset.test",
+    "description": "Work after a reset",
+    "amount": "10",
+    "currency": "USD",
+    "terms_days": "5",
+}
+
+
+@pytest.fixture
+def running_app(run_seed, monkeypatch, tmp_path):
+    """A seeded scratch database held open by an app's engine, as a running server holds it (issue #121)."""
+    monkeypatch.delenv("DEMO_PASSWORD", raising=False)
+    run_seed().dispose()
+    url = f"sqlite:///{tmp_path / 'seed.db'}"
+    engine = make_engine(url)
+    app = create_app(settings=Settings(database_url=url), engine=engine)
+    with TestClient(app) as client:
+        assert sign_in_status(client, DEFAULT_DEMO_PASSWORD) == 303
+        yield client, engine
+    engine.dispose()
+
+
+def sign_in_status(client: TestClient, password: str) -> int:
+    client.cookies.clear()
+    response = client.post("/login", data={"email": DEMO_EMAIL, "password": password}, follow_redirects=False)
+    return response.status_code
+
+
+def test_reset_while_the_app_runs_leaves_it_able_to_write(running_app, run_seed):
+    client, engine = running_app
+
+    run_seed("--reset").dispose()
+
+    assert counts(engine) == (1, 6, 26)
+    assert sign_in_status(client, DEFAULT_DEMO_PASSWORD) == 303
+    response = client.post("/invoices", data=INVOICE_FORM, follow_redirects=False)
+    assert response.status_code == 303, response.text
+    assert counts(engine) == (1, 7, 27)
+
+
+def test_reset_while_the_app_runs_applies_a_new_demo_password(running_app, run_seed, monkeypatch):
+    client, _ = running_app
+    monkeypatch.setenv("DEMO_PASSWORD", NEW_PASSWORD)
+
+    run_seed("--reset").dispose()
+
+    assert sign_in_status(client, NEW_PASSWORD) == 303
+    assert sign_in_status(client, DEFAULT_DEMO_PASSWORD) == 401
+
+
+def test_reset_empties_the_tables_in_place_and_says_so(running_app, run_seed, capsys):
+    client, engine = running_app
+    assert client.post("/invoices", data=INVOICE_FORM, follow_redirects=False).status_code == 303
+    assert counts(engine) == (1, 7, 27)
+    capsys.readouterr()
+
+    run_seed("--reset").dispose()
+
+    assert counts(engine) == (1, 6, 26)
+    assert "Emptied every table in place" in capsys.readouterr().out
