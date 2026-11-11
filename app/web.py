@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session
 from starlette.concurrency import run_in_threadpool
 
-from app.auth import COOKIE_NAME, Lockout, read_session_cookie
+from app.auth import COOKIE_NAME, Lockout, read_session_cookie, session_key_matches
 from app.config import Settings, get_settings
 from app.jobs import start_scheduler, stop_scheduler
 from app.llm import build_parser
@@ -71,11 +71,13 @@ def _add_routes(app: FastAPI, router: APIRouter) -> None:
         )
 
 
-def _load_user(engine, user_id: int) -> User | None:
+def _load_user(engine, user_id: int, session_key: str) -> User | None:
+    """The user a session cookie names, or None if the cookie's key is not theirs (issue #142)."""
     with Session(engine) as session:
         user = session.get(User, user_id)
-        if user is not None:
-            session.expunge(user)
+        if user is None or not session_key_matches(user, session_key):
+            return None
+        session.expunge(user)
         return user
 
 
@@ -124,11 +126,11 @@ def create_app(
         path = request.url.path
         if path in PUBLIC_PATHS or path.startswith("/static/"):
             return await call_next(request)
-        user_id = read_session_cookie(request.app.state.secret_key, request.cookies.get(COOKIE_NAME))
+        claim = read_session_cookie(request.app.state.secret_key, request.cookies.get(COOKIE_NAME))
         user = None
-        if user_id is not None:
+        if claim is not None:
             # The database read runs in the threadpool, off the event loop (issue #48).
-            user = await run_in_threadpool(_load_user, request.app.state.engine, user_id)
+            user = await run_in_threadpool(_load_user, request.app.state.engine, *claim)
         if user is None:
             # Pages and form posts go to sign-in, so an expired session never
             # shows raw JSON in place of a page (issue #84).

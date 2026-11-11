@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+import secrets
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Optional
@@ -20,6 +21,11 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Field, SQLModel, create_engine
 
 log = logging.getLogger("duebell.models")
+
+def new_session_key() -> str:
+    """A random key that ties a session cookie to one user (issue #142)."""
+    return secrets.token_urlsafe(32)
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -130,6 +136,10 @@ class User(SQLModel, table=True):
     email: str = Field(index=True, unique=True)
     password_hash: str
     created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    # Every session cookie carries this key, and sign-in accepts a cookie only
+    # while it matches, so a cookie never signs in a later user who reuses this
+    # id. A new key signs the user out everywhere (issue #142).
+    session_key: Optional[str] = Field(default_factory=new_session_key)
 
 
 class Client(SQLModel, table=True):
@@ -300,6 +310,20 @@ def init_db(engine) -> None:
     sync_indexes(engine)
     with engine.begin() as connection:
         seed_invoice_counter(connection)
+        fill_session_keys(connection)
+
+
+def fill_session_keys(connection) -> None:
+    """Give each user without a session key a new one (issue #142).
+
+    Users from an older build have none, so their cookies, which carry no
+    key, stop working once and they sign in again.
+    """
+    rows = connection.execute(text('SELECT id FROM "user" WHERE session_key IS NULL')).all()
+    for (user_id,) in rows:
+        connection.execute(
+            text('UPDATE "user" SET session_key = :key WHERE id = :id'), {"key": new_session_key(), "id": user_id}
+        )
 
 
 NUMBER_SUFFIX = re.compile(r"-(\d+)$")

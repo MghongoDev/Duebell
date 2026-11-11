@@ -68,7 +68,7 @@ def login(
     response = RedirectResponse(url="/", status_code=303)
     response.set_cookie(
         COOKIE_NAME,
-        make_session_cookie(request.app.state.secret_key, user.id),
+        make_session_cookie(request.app.state.secret_key, user.id, user.session_key),
         max_age=SESSION_SECONDS,
         httponly=True,
         samesite="lax",

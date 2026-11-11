@@ -48,3 +48,7 @@ The note above says the `--if-empty` start command lets a restart keep data. Tha
 ## Revision, 2026-11-11
 
 The decision above names four public paths. Since issue #84 there is a fifth: `POST /logout`. It only clears the session cookie and redirects to sign-in, so it reads and changes no records. It is public so that a person whose session has expired can still sign out.
+
+## Revision, 2026-11-11 (2)
+
+The decision above says the session cookie holds the user id and an expiry. It now also holds a random session key, which each user has and the database stores. Sign-in accepts a cookie only while its key matches the user's current key. User ids can repeat: a demo reset empties the tables, and SQLite then gives the next user a deleted user's id. Deleting the database file did the same. So a cookie must name the user, not just the id. On upgrade, every user gets a key, and existing sessions end once (issue #142).

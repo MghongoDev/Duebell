@@ -1,8 +1,10 @@
 """Sign-in, sessions and password hashing (issue #24, ADR 0008).
 
 Standard library only. Passwords use scrypt with a per-user salt. The session
-is an HMAC-signed cookie holding the user id and an expiry; the server keeps
-no session table. The cookie is HttpOnly and SameSite=Lax, which also stops
+is an HMAC-signed cookie holding the user id, the user's session key and an
+expiry; the server keeps no session table. A cookie counts only while its key
+matches the user's, so it never signs in a later user who reuses the id
+(issue #142). The cookie is HttpOnly and SameSite=Lax, which also stops
 other sites from posting forms with it. Sign-in itself needs no cookie, so the
 route also refuses a post whose Origin names another site (issue #45).
 """
@@ -19,7 +21,7 @@ from threading import Lock
 
 from sqlmodel import Session, select
 
-from app.models import User
+from app.models import User, new_session_key
 
 COOKIE_NAME = "duebell_session"
 SESSION_SECONDS = 12 * 60 * 60
@@ -90,7 +92,7 @@ def create_user(session: Session, email: str, password: str) -> User:
     validate_password(password)
     if session.exec(select(User).where(User.email == email)).first():
         raise AuthError("A user with that email already exists.")
-    user = User(email=email, password_hash=hash_password(password))
+    user = User(email=email, password_hash=hash_password(password), session_key=new_session_key())
     session.add(user)
     session.commit()
     session.refresh(user)
@@ -197,13 +199,18 @@ def _sign(secret: str, payload: bytes) -> str:
     return base64.urlsafe_b64encode(hmac.new(secret.encode(), payload, hashlib.sha256).digest()).decode().rstrip("=")
 
 
-def make_session_cookie(secret: str, user_id: int, now: float | None = None) -> str:
-    body = json.dumps({"uid": user_id, "exp": int((now or time.time()) + SESSION_SECONDS)}).encode()
+def make_session_cookie(secret: str, user_id: int, session_key: str, now: float | None = None) -> str:
+    expires = int((now or time.time()) + SESSION_SECONDS)
+    body = json.dumps({"uid": user_id, "key": session_key, "exp": expires}).encode()
     encoded = base64.urlsafe_b64encode(body).decode().rstrip("=")
     return f"{encoded}.{_sign(secret, body)}"
 
 
-def read_session_cookie(secret: str, value: str | None, now: float | None = None) -> int | None:
+def read_session_cookie(secret: str, value: str | None, now: float | None = None) -> tuple[int, str] | None:
+    """The (user id, session key) a valid, unexpired cookie holds, else None.
+
+    A cookie with no key, from before issue #142, is refused.
+    """
     if not value or "." not in value:
         return None
     encoded, signature = value.rsplit(".", 1)
@@ -219,5 +226,14 @@ def read_session_cookie(secret: str, value: str | None, now: float | None = None
         return None
     if not isinstance(data, dict) or data.get("exp", 0) < (now or time.time()):
         return None
-    uid = data.get("uid")
-    return uid if isinstance(uid, int) else None
+    uid, key = data.get("uid"), data.get("key")
+    if not isinstance(uid, int) or not isinstance(key, str) or not key:
+        return None
+    return uid, key
+
+
+def session_key_matches(user: User, key: str) -> bool:
+    """True if `key` is the user's current session key (issue #142)."""
+    if not user.session_key:
+        return False
+    return hmac.compare_digest(key.encode(), user.session_key.encode())
