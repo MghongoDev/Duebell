@@ -9,7 +9,7 @@ Find the message you see, then the fix.
 | "That email and password do not match." | Wrong details, or the user does not exist. | Run `scripts/reset_demo.py` for the demo user, or [add a user](add-a-user.md). |
 | "Too many failed attempts. Wait 15 minutes and try again." | Five wrong passwords for that email. | Wait, or restart the app. |
 | Signed out after every restart | `SECRET_KEY` is empty, so each start makes a new one. | Set `SECRET_KEY` in `.env`. |
-| Signed in but the dashboard is empty | The records belong to no user. | Run `scripts/create_user.py EMAIL --claim` once. |
+| Signed in but the dashboard is empty | The records belong to no user. | Run `scripts/create_user.py EMAIL --claim` once with the email you sign in with. It asks for no password and gives that user every record with no owner. See [add a user](add-a-user.md#adopt-an-older-database). |
 
 ## Creating invoices
 

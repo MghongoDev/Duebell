@@ -6,8 +6,11 @@ There is no public sign-up. Whoever runs the server adds each user here:
     .venv/bin/python scripts/create_user.py you@example.com --claim
 
 The password is read from a prompt, or from DUEBELL_PASSWORD when set.
---claim gives the new user every record that has no owner, which is how a
-database from before sign-in existed gets one.
+--claim gives the user every record that has no owner, which is how a
+database from before sign-in existed gets one. With --claim, an email that
+already has a user is not created again and no password is asked for; that
+user gets the records (issue #123). Without --claim, an existing email stops
+the script.
 """
 
 from __future__ import annotations
@@ -20,11 +23,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sqlmodel import Session, SQLModel
+from sqlmodel import Session, SQLModel, select
 
-from app.auth import AuthError, create_user
+from app.auth import AuthError, create_user, normalize_email
 from app.config import get_settings
-from app.models import init_db, make_engine
+from app.models import User, init_db, make_engine
 
 
 def claim_ownerless(session: Session, user_id: int) -> dict[str, int]:
@@ -47,15 +50,20 @@ def main() -> None:
     parser.add_argument("--claim", action="store_true", help="Give this user every record with no owner.")
     args = parser.parse_args()
 
-    password = os.getenv("DUEBELL_PASSWORD") or getpass.getpass("Password: ")
     engine = make_engine(get_settings().database_url)
     init_db(engine)
     with Session(engine) as session:
-        try:
-            user = create_user(session, args.email, password)
-        except AuthError as exc:
-            raise SystemExit(str(exc))
-        print(f"Created {user.email}.")
+        user = None
+        if args.claim:
+            email = normalize_email(args.email)
+            user = session.exec(select(User).where(User.email == email)).first()
+        if user is None:
+            password = os.getenv("DUEBELL_PASSWORD") or getpass.getpass("Password: ")
+            try:
+                user = create_user(session, args.email, password)
+            except AuthError as exc:
+                raise SystemExit(str(exc))
+            print(f"Created {user.email}.")
         if args.claim:
             claimed = claim_ownerless(session, user.id)
             summary = ", ".join(f"{count} {name}" for name, count in claimed.items()) or "nothing"

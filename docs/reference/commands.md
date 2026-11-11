@@ -19,7 +19,7 @@ Run each command from the repository root with the virtual environment's Python.
 | `scripts/seed.py --if-empty` | Seeds only if the database has no users, so running it at every start keeps existing data. |
 | `scripts/seed.py --require-password` | Exits with an error if `DEMO_PASSWORD` is unset, rather than use the published default. |
 | `scripts/create_user.py EMAIL` | Adds a user. Reads the password from `DUEBELL_PASSWORD` or a prompt. Passwords need at least 10 characters. |
-| `scripts/create_user.py EMAIL --claim` | Also gives that user every record with no owner. Use it once on a database from before sign-in. |
+| `scripts/create_user.py EMAIL --claim` | Also gives that user every record with no owner. If the user already exists, skips creating it and asks for no password. Use it once on a database from before sign-in. |
 
 ## Checks
 

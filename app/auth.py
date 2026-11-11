@@ -78,8 +78,13 @@ def validate_password(password: str) -> None:
         raise AuthError(f"Use a password of at most {MAX_PASSWORD_CHARS} characters.")
 
 
+def normalize_email(email: str) -> str:
+    """The form every user's email is stored and looked up in (issue #123)."""
+    return email.strip().lower()
+
+
 def create_user(session: Session, email: str, password: str) -> User:
-    email = email.strip().lower()
+    email = normalize_email(email)
     if not valid_email(email):
         raise AuthError("Enter a valid email address.")
     validate_password(password)
@@ -162,7 +167,7 @@ def authenticate(session: Session, email: str, password: str, lockout: Lockout) 
     a wrong password.
     """
     mismatch = AuthError("That email and password do not match.")
-    email = email.strip().lower()
+    email = normalize_email(email)
     if not valid_email(email):
         raise mismatch
     if not lockout.attempt(email):
