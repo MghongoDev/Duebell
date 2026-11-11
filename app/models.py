@@ -204,6 +204,10 @@ class Reminder(SQLModel, table=True):
     # call (issue #75). If PayPal is not in sent_channels, PayPal may have sent
     # it, so a retry skips PayPal. It never counts the reminder as delivered.
     paypal_attempted_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
+    # When Duebell last handed this reminder to the mail server, saved before
+    # the send (issue #118). If email is not in sent_channels, the server may
+    # have taken it, so a retry skips email. It never counts as delivered.
+    email_attempted_at: Optional[datetime] = Field(default=None, sa_type=UTCDateTime)
     # BEFORE_DUE or OVERDUE, set when drafted (issue #42). A row from an older
     # build has none; the scan infers it from created_at and the due date.
     stage: Optional[str] = None

@@ -4,8 +4,10 @@ The seed belongs to a demo user. --if-empty seeds only a database with no
 users, and --require-password refuses the published default password, which
 is how a hosted instance starts. A bare rerun on a seeded database changes
 nothing, and an unusable DEMO_PASSWORD exits with one line, not a traceback
-(issue #86). --reset checks the password before it deletes the database, so a
-bad one leaves the data in place (issue #102).
+(issue #86). --reset checks the password before it deletes anything, so a
+bad one leaves the data in place (issue #102). It then empties every table in
+place rather than deleting the file, so a running app keeps working and sees
+the new data (issue #121).
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sqlmodel import Session, select
+from sqlmodel import Session, SQLModel, select
 
 from app.auth import AuthError, create_user, validate_password
 from app.config import get_settings
@@ -49,6 +51,19 @@ def reset_database(settings) -> None:
         path = Path(settings.database_url.replace("sqlite:///", ""))
         if path.exists():
             path.unlink()
+
+
+def empty_database(engine) -> None:
+    """Delete every row of every table in one transaction, keeping the file (issue #121).
+
+    A running app keeps its connection on the same file, so it goes on
+    writing and sees the reseeded data. Deleting the file would leave it on a
+    deleted, read-only copy until restart. Children go before parents, so no
+    row points at a deleted one.
+    """
+    with engine.begin() as connection:
+        for table in reversed(SQLModel.metadata.sorted_tables):
+            connection.execute(table.delete())
 
 
 DEMO_EMAIL = "demo@duebell.test"
@@ -172,7 +187,7 @@ def seed(session: Session, user_id: int | None = None) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed the Duebell demo database.")
-    parser.add_argument("--reset", action="store_true", help="Delete the database first.")
+    parser.add_argument("--reset", action="store_true", help="Empty every table first.")
     parser.add_argument("--if-empty", action="store_true", help="Seed only if the database has no users.")
     parser.add_argument(
         "--require-password", action="store_true", help="Refuse to use the default demo password."
@@ -184,9 +199,12 @@ def main() -> None:
         if args.reset:
             # Check the password before the delete, so a bad one leaves the data in place (issue #102).
             demo_password(args.require_password)
-            reset_database(settings)
         engine = make_engine(settings.database_url)
         init_db(engine)
+        if args.reset:
+            # Empty the tables, not the file, so a running app keeps working (issue #121).
+            empty_database(engine)
+            print("Emptied every table in place. A running app keeps working and sees the new data.")
         with Session(engine) as session:
             if args.if_empty:
                 summary = seed_if_empty(session, args.require_password)

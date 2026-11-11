@@ -24,6 +24,11 @@ The script prints what it claimed, for example `Claimed 7 client, 27 invoice, 2 
 
 ## Change the demo password
 
-The seed creates `demo@duebell.test` with `DEMO_PASSWORD`, or `duebell-demo-2026` if that is unset. To change it, set `DEMO_PASSWORD` and run `scripts/reset_demo.py`. That also resets the demo data.
+The seed creates `demo@duebell.test` with `DEMO_PASSWORD`, or `duebell-demo-2026` if that is unset. To change it, set `DEMO_PASSWORD` and run `scripts/reset_demo.py`. That also resets the demo data, and removes every other user and their records.
+
+You can run it while the app runs. The script empties each table in the same database file, so the app keeps working and the new password works at once. Two things live in the app's memory and do not reset:
+
+- A browser that was signed in stays signed in until its session ends, after 12 hours.
+- If five sign-ins failed in the last 15 minutes, the email stays locked out. Wait, or restart the app.
 
 There is no password change for other users yet.

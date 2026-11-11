@@ -14,7 +14,7 @@ Run each command from the repository root with the virtual environment's Python.
 
 | Command | Does |
 | --- | --- |
-| `scripts/reset_demo.py` | Deletes the SQLite file and seeds the demo. The same as `scripts/seed.py --reset`. It checks `DEMO_PASSWORD` first: if the password is unusable, or unset with `--require-password`, it exits with a one-line error and deletes nothing. |
+| `scripts/reset_demo.py` | Empties every table in one transaction and seeds the demo. The same as `scripts/seed.py --reset`. It keeps the database file, so a running app keeps working and sees the new data. It checks `DEMO_PASSWORD` first: if the password is unusable, or unset with `--require-password`, it exits with a one-line error and deletes nothing. |
 | `scripts/seed.py` | Creates `demo@duebell.test` if missing, then six clients with set payment habits and 26 invoices, all owned by that user. It writes the clients and invoices together or not at all. On a seeded database it prints "The demo data is already seeded." and changes nothing. Use `--reset` to start over. A `DEMO_PASSWORD` under 10 characters stops it with a one-line error that names the minimum. It then writes no demo data, and with `--reset` it deletes nothing. |
 | `scripts/seed.py --if-empty` | Seeds only if the database has no users, so running it at every start keeps existing data. |
 | `scripts/seed.py --require-password` | Exits with an error if `DEMO_PASSWORD` is unset, rather than use the published default. |

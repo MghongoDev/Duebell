@@ -26,4 +26,6 @@ In mock mode, the default, emails stay in memory and nobody receives them.
 
 If PayPal succeeds and the email fails, the reminder stays pending and the page shows the error. The draft notes that PayPal already sent it. Approve again and only the email goes out.
 
+If the mail server takes the email but its answer never arrives, Duebell cannot tell whether the email went out. It counts the email as sent and warns you to check your sent mail, so the client never gets it twice. If the server refused the email before taking it, approving again sends it.
+
 An invoice without a PayPal ID can still be reminded by email alone. The scan drafts reminders only for invoices PayPal holds, so this applies only to older drafts.

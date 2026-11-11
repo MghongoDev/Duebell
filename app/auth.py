@@ -24,7 +24,7 @@ from app.models import User
 COOKIE_NAME = "duebell_session"
 SESSION_SECONDS = 12 * 60 * 60
 MIN_PASSWORD_CHARS = 10
-# Sign-in refuses longer input before the lockout or scrypt sees it (issue #82).
+# Sign-in refuses longer input before the lockout or scrypt sees it (issues #82, #122).
 MAX_EMAIL_CHARS = 254
 MAX_PASSWORD_CHARS = 1024
 SCRYPT = {"n": 2**14, "r": 8, "p": 1, "dklen": 32}
@@ -107,7 +107,9 @@ class Lockout:
     An attempt is counted before its password is checked, so attempts that
     arrive together cannot all pass the check (issue #45). A success clears
     the count. Entries older than LOCKOUT_SECONDS are swept out, and the table
-    holds at most `max_entries` emails.
+    holds at most `max_entries` emails. A locked email is never evicted to make
+    room; when every entry is locked, a new email is refused until the sweep
+    frees one (issue #122).
     """
 
     def __init__(self, max_entries: int = MAX_LOCKOUT_ENTRIES) -> None:
@@ -124,7 +126,11 @@ class Lockout:
         return [at for at in self._attempts.get(email, []) if now - at < LOCKOUT_SECONDS]
 
     def _sweep(self, now: float) -> None:
-        """Drop expired entries, then make room for one more email if the table is full."""
+        """Drop expired entries, then make room for one more email by evicting unlocked ones.
+
+        A locked email is never evicted, so a flood of new emails cannot free
+        one (issue #122). If every entry is locked, the table stays full.
+        """
         self._last_sweep = now
         for email in list(self._attempts):
             recent = self._recent(email, now)
@@ -132,20 +138,27 @@ class Lockout:
                 self._attempts[email] = recent
             else:
                 del self._attempts[email]
-        while len(self._attempts) >= self._max_entries:
-            # Evict an unlocked email first, so a flood of new emails cannot free a locked one.
-            unlocked = [email for email, times in self._attempts.items() if len(times) < MAX_FAILURES]
-            pool = unlocked or list(self._attempts)
-            del self._attempts[min(pool, key=lambda email: self._attempts[email][-1])]
+        if len(self._attempts) < self._max_entries:
+            return
+        unlocked = [email for email, times in self._attempts.items() if len(times) < MAX_FAILURES]
+        unlocked.sort(key=lambda email: self._attempts[email][-1])
+        for email in unlocked[: len(self._attempts) - self._max_entries + 1]:
+            del self._attempts[email]
 
     def attempt(self, email: str) -> bool:
-        """Count one attempt for `email`. False, and nothing counted, if it is locked."""
+        """Count one attempt for `email`. False, and nothing counted, if it is locked.
+
+        Also False, and nothing stored, for a new email while the table is full
+        of locked ones (issue #122).
+        """
         with self._lock:
             now = time.time()
             if now - self._last_sweep >= SWEEP_SECONDS or (
                 email not in self._attempts and len(self._attempts) >= self._max_entries
             ):
                 self._sweep(now)
+            if email not in self._attempts and len(self._attempts) >= self._max_entries:
+                return False
             recent = self._recent(email, now)
             if len(recent) >= MAX_FAILURES:
                 self._attempts[email] = recent
@@ -161,19 +174,17 @@ class Lockout:
 def authenticate(session: Session, email: str, password: str, lockout: Lockout) -> User:
     """Sign a user in, or raise AuthError.
 
-    An email no user can have is refused before the lockout counts it, so
-    junk cannot fill the table, and a password too long for any user is
-    refused before scrypt hashes it (issue #82). Both get the same message as
-    a wrong password.
+    An email no user can have, or a password too long for any user, is
+    refused before the lockout counts it or scrypt hashes it (issues #82,
+    #122), so junk cannot fill the table or cheaply lock an email. Both get
+    the same message as a wrong password.
     """
     mismatch = AuthError("That email and password do not match.")
     email = normalize_email(email)
-    if not valid_email(email):
+    if not valid_email(email) or len(password) > MAX_PASSWORD_CHARS:
         raise mismatch
     if not lockout.attempt(email):
         raise AuthError("Too many failed attempts. Wait 15 minutes and try again.")
-    if len(password) > MAX_PASSWORD_CHARS:
-        raise mismatch
     user = session.exec(select(User).where(User.email == email)).first()
     valid = check_password(password, user.password_hash if user else _DUMMY_HASH)
     if not user or not valid:

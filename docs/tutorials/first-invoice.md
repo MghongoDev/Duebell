@@ -20,9 +20,10 @@ The copied `.env` leaves every mode on `mock`.
 .venv/bin/python scripts/reset_demo.py
 ```
 
-The script deletes any old database and creates six clients with different payment habits. It prints the sign-in details:
+The script empties any old database and creates six clients with different payment habits. It prints the sign-in details:
 
 ```text
+Emptied every table in place. A running app keeps working and sees the new data.
 Seeded 6 clients and 26 invoices.
 Sign in as demo@duebell.test. The password is DEMO_PASSWORD, or duebell-demo-2026 if unset.
 ```
@@ -71,7 +72,7 @@ You took one invoice through every step Duebell manages: parse, validate, send, 
 
 ## If something goes wrong
 
-If you cannot sign in, run step 2 again: it recreates the demo user. If **Scan now** drafts nothing, check the sentence says `net 2 days`. Every other error message is in [Troubleshoot](../how-to/troubleshoot.md).
+If you cannot sign in, run step 2 again in a second terminal: it recreates the demo user. Leave the app running; it picks up the new data. If the page says "Too many failed attempts", wait 15 minutes or restart the app. If **Scan now** drafts nothing, check the sentence says `net 2 days`. Every other error message is in [Troubleshoot](../how-to/troubleshoot.md).
 
 ## Next
 
