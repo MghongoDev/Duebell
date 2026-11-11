@@ -502,13 +502,22 @@ def _drop_unpublished(session: Session, item: ScheduledInvoice) -> None:
     """
     session.rollback()
     session.refresh(item)
+    _delete_unpublished_draft(session, item)
+    _unclaim(session, item)
+
+
+def _delete_unpublished_draft(session: Session, item: ScheduledInvoice) -> None:
+    """Delete the item's linked draft if PayPal never took it, and unlink it. Does not commit.
+
+    Such a draft could never be sent, so a failed approval, Skip and Cancel
+    all delete it (issues #74, #116).
+    """
     linked = session.get(Invoice, item.invoice_id) if item.invoice_id is not None else None
     if linked is not None and linked.status == InvoiceStatus.DRAFT and not linked.paypal_invoice_id:
         item.invoice_id = None
         session.add(item)
         session.delete(linked)
         session.flush()
-    _unclaim(session, item)
 
 
 def release_interrupted(session: Session) -> int:
@@ -616,7 +625,8 @@ def reject_scheduled(session: Session, item: ScheduledInvoice) -> ScheduledInvoi
 
     A draft PayPal holds unsent could still reach the client from its invoice
     row, so the user sends it or cancels it in PayPal first. Skipping never
-    cancels anything in PayPal.
+    cancels anything in PayPal. A linked draft PayPal never took is deleted
+    (issue #116).
     """
     if item.status != ScheduledInvoiceStatus.PENDING:
         raise ValueError("Only a pending scheduled invoice can be rejected.")
@@ -628,6 +638,7 @@ def reject_scheduled(session: Session, item: ScheduledInvoice) -> ScheduledInvoi
             f"PayPal holds invoice {linked.invoice_number} as an unsent draft. Send it from its "
             "invoice row, or cancel it in PayPal and refresh it, before you skip this one."
         )
+    _delete_unpublished_draft(session, item)
     item.status = ScheduledInvoiceStatus.REJECTED
     session.add(item)
     session.commit()
@@ -638,10 +649,17 @@ def reject_scheduled(session: Session, item: ScheduledInvoice) -> ScheduledInvoi
 
 
 def cancel_schedule(session: Session, schedule: Schedule) -> Schedule:
-    """Stop future drafts. Invoices already sent are left alone."""
+    """Stop future drafts. Invoices already sent are left alone.
+
+    A pending item's linked draft that PayPal never took is deleted. An item
+    an approval holds keeps its draft: that approval may be creating it in
+    PayPal now, and deletes it itself if PayPal refuses (issue #116).
+    """
     schedule.status = ScheduleStatus.CANCELLED
     session.add(schedule)
     for item in _open_items(session, schedule):
+        if item.status == ScheduledInvoiceStatus.PENDING:
+            _delete_unpublished_draft(session, item)
         item.status = ScheduledInvoiceStatus.CANCELLED
         session.add(item)
     session.commit()
