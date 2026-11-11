@@ -103,7 +103,10 @@ def create_app(
         if app.state.scheduler_enabled:
             stop_scheduler(app)
 
-    app = FastAPI(title="Duebell", version="0.1.0", lifespan=lifespan)
+    # Swagger UI and ReDoc load scripts from a CDN plus an inline script, which
+    # the CSP below blocks, so both pages are off. /openapi.json stays and
+    # needs sign-in like any other route (issue #124).
+    app = FastAPI(title="Duebell", version="0.1.0", lifespan=lifespan, docs_url=None, redoc_url=None)
     app.state.settings = settings
     app.state.engine = engine
     app.state.gateway = gateway

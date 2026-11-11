@@ -6,7 +6,7 @@ Every read takes an ownership scope (app.ownership); creation records an owner.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Mapping
 from uuid import uuid4
 
@@ -324,15 +324,26 @@ def client_map(session: Session, scope: Scope) -> dict[int, Client]:
     return {client.id: client for client in session.exec(owned(select(Client), Client, scope)).all()}
 
 
-def invoice_rows(session: Session, scope: Scope) -> list[dict]:
+def is_overdue(invoice: Invoice, now: datetime) -> bool:
+    """True once the UTC calendar day of the invoice's due_at has ended (issues #80, #119).
+
+    PayPal gets only a due date, `due_at`'s UTC date (see `payment_term`), so
+    the client sees a due day, not a time. The invoice stays due all that day
+    and is overdue from the next UTC midnight. The reminder scan, its stage
+    and wording, and the dashboard's overdue flag all use this one test.
+    """
+    return as_utc(invoice.due_at).astimezone(timezone.utc).date() < as_utc(now).astimezone(timezone.utc).date()
+
+
+def invoice_rows(session: Session, scope: Scope, now: datetime | None = None) -> list[dict]:
     clients = client_map(session, scope)
-    now = utcnow()
+    now = now or utcnow()
     rows = []
     for invoice in list_invoices(session, scope):
         client = clients.get(invoice.client_id)
         closed = invoice.status in CLOSED_STATUSES
         # A draft was never sent, so the client owes nothing yet (issue #116).
-        overdue = not closed and invoice.status != InvoiceStatus.DRAFT and invoice.due_at < now
+        overdue = not closed and invoice.status != InvoiceStatus.DRAFT and is_overdue(invoice, now)
         reasons = [line for line in invoice.risk_reasons.splitlines() if line.strip()]
         rows.append(
             {
