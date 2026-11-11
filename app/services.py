@@ -288,7 +288,8 @@ def invoice_rows(session: Session, scope: Scope) -> list[dict]:
     for invoice in list_invoices(session, scope):
         client = clients.get(invoice.client_id)
         closed = invoice.status in CLOSED_STATUSES
-        overdue = not closed and invoice.due_at < now
+        # A draft was never sent, so the client owes nothing yet (issue #116).
+        overdue = not closed and invoice.status != InvoiceStatus.DRAFT and invoice.due_at < now
         reasons = [line for line in invoice.risk_reasons.splitlines() if line.strip()]
         rows.append(
             {

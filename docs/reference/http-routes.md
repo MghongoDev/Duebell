@@ -50,8 +50,8 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 | Method | Path | Does |
 | --- | --- | --- |
 | `POST` | `/api/scheduled/{item_id}/approve` | Creates and sends a pending scheduled invoice. The item is linked to its invoice before PayPal is called, so a retry never creates a second one: if an earlier try saved the invoice but stopped before PayPal created it, creates that one in PayPal; if PayPal holds it unsent, sends it; if PayPal has since sent it, marks the item sent. If the linked invoice was cancelled or refunded before it was sent, the item is unlinked from it and a new invoice is created and sent. Returns `status`, `invoice_id`, and a `warning` if PayPal did not confirm the send in time. `409` if the item is not pending, another approval or a Send on its invoice row holds it, or its schedule is not active. `502` if PayPal fails; the item goes back to pending, unless its schedule was cancelled meanwhile, when it stays cancelled. |
-| `POST` | `/api/scheduled/{item_id}/reject` | Skips this invoice. A repeat carries on. `409` if the item is not pending, if PayPal holds its linked invoice as an unsent draft (send it from its invoice row, or cancel it in PayPal and refresh it, first), or if PayPal has already sent the linked invoice. |
-| `POST` | `/api/schedules/{schedule_id}/cancel` | Stops the schedule and cancels its upcoming and pending invoices, and any an approval is sending. Sent invoices stay as they are. |
+| `POST` | `/api/scheduled/{item_id}/reject` | Skips this invoice. A repeat carries on. `409` if the item is not pending, if PayPal holds its linked invoice as an unsent draft (send it from its invoice row, or cancel it in PayPal and refresh it, first), or if PayPal has already sent the linked invoice. A linked draft that PayPal never took is deleted. |
+| `POST` | `/api/schedules/{schedule_id}/cancel` | Stops the schedule and cancels its upcoming and pending invoices, and any an approval is sending. A pending invoice's linked draft that PayPal never took is deleted. Sent invoices stay as they are. |
 
 ## PayPal webhook
 
