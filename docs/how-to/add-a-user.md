@@ -18,6 +18,8 @@ A database from before sign-in existed has records with no owner. Nobody can see
 .venv/bin/python scripts/create_user.py you@example.com --claim
 ```
 
+If no user has that email, the script asks for a password, creates the user, then claims. If the user already exists, the script asks for no password and gives the records to that user. Without `--claim`, an email that already has a user stops the script with "A user with that email already exists."
+
 The script prints what it claimed, for example `Claimed 7 client, 27 invoice, 2 reminder.` Run `--claim` once. Later records always have an owner.
 
 ## Change the demo password
