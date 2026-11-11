@@ -37,7 +37,7 @@ Find the message you see, then the fix.
 | **Scan now** drafts nothing | No sent invoice is overdue, or due within `REMINDER_WINDOW_DAYS` with Medium or High risk. Seeded invoices never reached PayPal, so they are skipped. | Create an invoice with short terms, or wait. |
 | "This invoice has no PayPal id yet." | The invoice never reached PayPal. | Remind by email, or send the invoice first. |
 | "Already sent via PayPal. Approving again sends only the rest." | An earlier approval sent PayPal, then email failed. | Approve again once email works. |
-| "PayPal did not confirm the reminder in time..." | A toolkit call timed out. | Check PayPal for the reminder. Duebell counts it as sent. |
+| "PayPal did not confirm the reminder in time..." | A PayPal call timed out after the request went out. | Check PayPal for the reminder. Duebell counts it as sent. |
 | "The email could not be sent" | SMTP refused or timed out. | Check the `SMTP_` settings. The reminder stays pending. |
 
 ## Payments and webhooks

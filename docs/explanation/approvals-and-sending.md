@@ -39,7 +39,7 @@ Four failures could each lead to a duplicate. Duebell handles each one different
 | --- | --- | --- |
 | PayPal creates an invoice, then the send fails | A retry creates a second invoice. | The invoice stays a draft with its PayPal ID. Approving again, or clicking **Send** on the draft's row, sends that draft. |
 | Email fails after PayPal sent the reminder | A retry reminds through PayPal again. | `sent_channels` records PayPal, and the retry skips it. |
-| A toolkit call times out | The call keeps running and may still send. A retry sends again. | It counts the PayPal reminder as sent and warns the user to check PayPal. |
+| A PayPal call times out | PayPal may have acted, or may still act. A retry sends again. | It counts the PayPal reminder or invoice as sent and warns the user to check PayPal. |
 | PayPal sends the reminder, then Duebell fails to save that | A retry reminds through PayPal again. | Duebell saves `paypal_attempted_at` before it calls PayPal. The retry finds it, counts the PayPal reminder as sent, and warns the user to check PayPal. If PayPal refused the call, Duebell clears it, so the retry sends through PayPal. |
 
 The last two cases trade one possible missed reminder for no duplicate. A duplicate reaches the client. A missed one shows up when the user checks PayPal, and they can remind from there. Duebell will not draft another reminder for that invoice in the same stage, because it counts this one as sent.
@@ -48,6 +48,8 @@ The last two cases trade one possible missed reminder for no duplicate. A duplic
 
 The sandbox gateway tries a call up to three times when it times out or PayPal returns a server error. If PayPal acted on a request whose answer was lost, a plain retry would repeat it. So every POST and PUT carries a `PayPal-Request-Id` header, chosen once per call and kept for all its retries. Where PayPal honours the header, it treats a repeated ID as the same request. The webhook signature check is a POST too, so it carries one, though repeating it does no harm.
 
+If a POST or PUT still fails and any attempt lost its answer after the request went out (a read timeout or a dropped connection), the gateway reports a timeout, as the toolkit does, and the rule above counts the call as sent. A refusal from PayPal after such an attempt counts the same way, since PayPal may be saying it already acted. A call that never reached PayPal, because the connection did not open, stays a plain error, so a retry sends it. Reads stay plain errors too.
+
 How far that protects depends on the endpoint:
 
 | Call | Is the header documented? |
@@ -55,7 +57,7 @@ How far that protects depends on the endpoint:
 | Create an invoice | Yes. PayPal's troubleshooting guide says a repeated ID returns the original result instead of a new invoice. |
 | Send an invoice, send a reminder, record a payment | No. Duebell sends the header anyway, as PayPal's general guidance advises for every POST. Whether these endpoints honour it is unchecked. |
 
-Toolkit calls carry no request ID, because the toolkit builds its own requests. They do not retry either, so the timeout rule above covers them. A live sandbox check (#32) will confirm which endpoints honour the header.
+Toolkit calls carry no request ID, because the toolkit builds its own requests. They do not retry either. A toolkit call that runs past `PAYPAL_TIMEOUT_SECONDS` keeps running, so the timeout rule above covers it. A live sandbox check (#32) will confirm which endpoints honour the header.
 
 ## Schedules
 
