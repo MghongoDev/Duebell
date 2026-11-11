@@ -1,4 +1,4 @@
-"""Recurring invoices and instalment plans (issues #24, #25, #39, #40, #43, #74, #77, #78, #79; ADRs 0003, 0007, 0008).
+"""Recurring invoices and instalment plans (issues #24, #25, #39, #40, #43, #74, #77, #78, #79, #117; ADRs 0003, 0007, 0008).
 
 A schedule is the rule: repeat an invoice every interval, or split one amount
 into instalments. Each future invoice is a ScheduledInvoice. The scan moves due
@@ -627,6 +627,10 @@ def reject_scheduled(session: Session, item: ScheduledInvoice) -> ScheduledInvoi
     row, so the user sends it or cancels it in PayPal first. Skipping never
     cancels anything in PayPal. A linked draft PayPal never took is deleted
     (issue #116).
+
+    One conditional update moves the item from PENDING to REJECTED. If an
+    approval or a Send claimed it after it was read, nothing moves and the
+    skip is refused, so the item ends as that approval leaves it (issue #117).
     """
     if item.status != ScheduledInvoiceStatus.PENDING:
         raise ValueError("Only a pending scheduled invoice can be rejected.")
@@ -638,10 +642,18 @@ def reject_scheduled(session: Session, item: ScheduledInvoice) -> ScheduledInvoi
             f"PayPal holds invoice {linked.invoice_number} as an unsent draft. Send it from its "
             "invoice row, or cancel it in PayPal and refresh it, before you skip this one."
         )
+    moved = session.exec(
+        update(ScheduledInvoice)
+        .where(ScheduledInvoice.id == item.id, ScheduledInvoice.status == ScheduledInvoiceStatus.PENDING)
+        .values(status=ScheduledInvoiceStatus.REJECTED)
+    )
+    if moved.rowcount != 1:
+        session.rollback()
+        session.refresh(item)
+        raise ValueError("This scheduled invoice changed while you skipped it. It is no longer pending.")
     _delete_unpublished_draft(session, item)
-    item.status = ScheduledInvoiceStatus.REJECTED
-    session.add(item)
     session.commit()
+    session.refresh(item)
     schedule = session.get(Schedule, item.schedule_id)
     if schedule:
         _finish_if_done(session, schedule)
@@ -651,20 +663,43 @@ def reject_scheduled(session: Session, item: ScheduledInvoice) -> ScheduledInvoi
 def cancel_schedule(session: Session, schedule: Schedule) -> Schedule:
     """Stop future drafts. Invoices already sent are left alone.
 
-    A pending item's linked draft that PayPal never took is deleted. An item
-    an approval holds keeps its draft: that approval may be creating it in
-    PayPal now, and deletes it itself if PayPal refuses (issue #116).
+    Each open item is cancelled with one conditional update on the status it
+    was read in, so an item an approval marks SENT meanwhile stays SENT
+    (issue #117). An item an approval holds is cancelled but keeps its draft:
+    that approval may be creating it in PayPal now. If PayPal succeeds, the
+    approval marks it SENT; if PayPal fails, it stays CANCELLED and the
+    approval deletes a draft PayPal refused (issues #77, #116). A pending
+    item's linked draft that PayPal never took is deleted.
     """
+    for item in _open_items(session, schedule):
+        _cancel_item(session, item)
     schedule.status = ScheduleStatus.CANCELLED
     session.add(schedule)
-    for item in _open_items(session, schedule):
-        if item.status == ScheduledInvoiceStatus.PENDING:
-            _delete_unpublished_draft(session, item)
-        item.status = ScheduledInvoiceStatus.CANCELLED
-        session.add(item)
     session.commit()
     session.refresh(schedule)
     return schedule
+
+
+def _cancel_item(session: Session, item: ScheduledInvoice) -> None:
+    """Cancel an open item only if it is still in the status read. Does not commit (issue #117).
+
+    If it moved meanwhile, it is read again and cancelled from its new status
+    while that is still open. A pending item's draft PayPal never took is
+    deleted after the update, in the same transaction, so no approval can
+    claim the item in between (issue #116).
+    """
+    while item.status in OPEN_STATUSES:
+        read = item.status
+        moved = session.exec(
+            update(ScheduledInvoice)
+            .where(ScheduledInvoice.id == item.id, ScheduledInvoice.status == read)
+            .values(status=ScheduledInvoiceStatus.CANCELLED)
+        )
+        if moved.rowcount == 1:
+            if read == ScheduledInvoiceStatus.PENDING:
+                _delete_unpublished_draft(session, item)
+            return
+        session.refresh(item)
 
 
 def _finish_if_done(session: Session, schedule: Schedule) -> None:
