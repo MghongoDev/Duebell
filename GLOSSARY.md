@@ -37,7 +37,7 @@ The number of days a client has to pay, counted from the issue date.
 _Avoid_: Net terms, credit period
 
 **Due date**:
-The date on which an invoice becomes overdue.
+The last day an invoice can be paid on time. It is the UTC date of the invoice's due time, and the invoice becomes overdue when that day ends.
 _Avoid_: Deadline
 
 **Risk score**:
@@ -61,7 +61,7 @@ A message that asks a client to pay an unpaid invoice. Duebell drafts it; a huma
 _Avoid_: Nudge, follow-up, chase
 
 **Stage**:
-Where an invoice stood when its reminder was drafted: before due, or overdue once its due time has passed. An invoice gets at most one sent reminder in each stage. A reminder counts as sent in its stage once any channel has delivered it, whatever its status, so a draft PayPal sent and the user then rejected still counts. A rejected draft that no channel delivered counts for nothing. Stage is separate from tone: a High-risk invoice's before-due reminder is already firm.
+Where an invoice stood when its reminder was drafted: before due, or overdue once its due day has ended. The due day is the UTC date of the invoice's due time, the date PayPal shows the client, so an invoice is still before due on the due day itself. An invoice gets at most one sent reminder in each stage. A reminder counts as sent in its stage once any channel has delivered it, whatever its status, so a draft PayPal sent and the user then rejected still counts. A rejected draft that no channel delivered counts for nothing. Stage is separate from tone: a High-risk invoice's before-due reminder is already firm.
 _Avoid_: Phase, round, reminder level
 
 **Scan**:

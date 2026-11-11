@@ -21,7 +21,7 @@ from app.models import Client, Invoice, Reminder, ReminderStage, ReminderStatus,
 from app.ownership import Scope, owned
 from app.paypal import PayPalError, PayPalGateway, PayPalTimeout
 from app.risk import RiskLevel
-from app.services import CLOSED_STATUSES, OWED_STATUSES, money, reject_drafts_if_closed
+from app.services import CLOSED_STATUSES, OWED_STATUSES, is_overdue, money, reject_drafts_if_closed
 
 # Every owed status, partial ones included (issue #112).
 REMINDABLE_STATUSES = OWED_STATUSES
@@ -42,20 +42,11 @@ class Channel(StrEnum):
 CHANNELS = tuple(Channel)
 
 
-def is_overdue(invoice: Invoice, now: datetime) -> bool:
-    """True once `now` is past the invoice's due time (issue #80).
-
-    The scan, the stage and the reminder's wording all use this one test. It
-    matches the dashboard's overdue flag in `app.services.invoice_rows`.
-    """
-    return invoice.due_at < now
-
-
 def reminder_stage(invoice: Invoice, now: datetime) -> ReminderStage:
-    """The stage a reminder drafted at `now` belongs to (issues #42, #80).
+    """The stage a reminder drafted at `now` belongs to (issues #42, #80, #119).
 
-    It matches the reminder's opening line: OVERDUE once the invoice is past
-    its due time, BEFORE_DUE until then.
+    It matches the reminder's opening line: OVERDUE once the invoice's UTC
+    due day has ended, BEFORE_DUE until then, the due day included (issue #119).
     """
     if is_overdue(invoice, now):
         return ReminderStage.OVERDUE
@@ -131,8 +122,8 @@ def _sent_stages(session: Session) -> set[tuple[int, ReminderStage]]:
     client. A rejected draft no channel delivered counts for nothing.
 
     A reminder from a build before issue #42 has no stage. It counts in the
-    stage it would get if drafted at its created_at: overdue if that was past
-    the due time, before due otherwise (issue #80).
+    stage it would get if drafted at its created_at: overdue if that was after
+    the invoice's UTC due day, before due otherwise (issues #80, #119).
     """
     rows = session.exec(
         select(Reminder, Invoice)
