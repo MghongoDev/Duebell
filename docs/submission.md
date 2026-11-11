@@ -36,7 +36,7 @@ A freelancer finishes the work, sends the invoice, and then has to remember to c
 
 ## Evidence
 
-- `pytest`: 499 tests pass, with no network or credentials.
+- `pytest`: the full test suite passes in CI on Python 3.12 and 3.15, with no network or credentials.
 - A hand run on 11 November 2026 checked sandbox and toolkit modes against the PayPal sandbox, with webhooks through a public URL (#32). PayPal accepted the due date Duebell sends. Creating and sending invoices, reminders, payments by the sandbox buyer, webhooks, simulated payments and Refresh all worked, and a retried create left one invoice in PayPal.
 - Live evals on 3 November 2026: parse 10 of 10 cases exact with 50 of 50 fields correct, reminders 10 of 10, webhook pass.
 - `scripts/smoke.py`: three full demo runs from a fresh database, through the HTTP routes: sign in, parse, create, scan, approve the reminder, simulate payment, replay the webhook, refresh.
