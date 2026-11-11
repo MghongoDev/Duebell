@@ -5,10 +5,10 @@ Run each command from the repository root with the virtual environment's Python.
 ## Run the app
 
 ```bash
-.venv/bin/uvicorn app.web:app --reload
+.venv/bin/uvicorn app.main:app --reload
 ```
 
-The app listens on http://127.0.0.1:8000. The background scheduler drafts reminders every 30 minutes and refits the [risk comparison](../explanation/risk-scores.md) every six hours.
+`app.main` holds the served app; nothing else imports it. The app listens on http://127.0.0.1:8000. The background scheduler drafts reminders every 30 minutes and refits the [risk comparison](../explanation/risk-scores.md) every six hours.
 
 ## Data and users
 
@@ -27,8 +27,8 @@ Install the test and lint tools first: `.venv/bin/pip install -r requirements-de
 
 | Command | Does |
 | --- | --- |
-| `pytest -q` | Runs the test suite. No network, no credentials. |
-| `scripts/smoke.py` | Resets a scratch database three times and runs the whole demo through the HTTP routes each time: sign in, parse, create, scan, approve the reminder, simulate payment, replay the webhook, refresh. Prints `Smoke: pass` or the step that failed. |
+| `pytest -q` | Runs the test suite. No network, no credentials. Each test builds its app on its own in-memory or temporary database, so a running dev server's database is never touched. |
+| `scripts/smoke.py` | Resets a scratch database, `/tmp/duebell-smoke.db`, three times and runs the whole demo through the HTTP routes each time: sign in, parse, create, scan, approve the reminder, simulate payment, replay the webhook, refresh. Prints `Smoke: pass` or the step that failed. |
 | `scripts/evals.py` | Ten reminder cases and a webhook replay check, offline. The ten parsing cases run only in live mode with credentials; otherwise the script says it skipped them. Exits non-zero on any failure. |
 | `scripts/evals.py --live` | Forces the parsing cases. Fails if live mode has no credentials. |
 | `scripts/train_risk.py` | Fits logistic regression on synthetic histories and prints held-out accuracy and AUC beside the rule baseline. |

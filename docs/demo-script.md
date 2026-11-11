@@ -6,7 +6,7 @@ Target length: 2 minutes 45 seconds. Record at 1440p or higher. Keep the cursor 
 
 ```bash
 .venv/bin/python scripts/reset_demo.py
-PAYPAL_MODE=mock LLM_MODE=live .venv/bin/uvicorn app.web:app
+PAYPAL_MODE=mock LLM_MODE=live .venv/bin/uvicorn app.main:app
 ```
 
 Sign in as `demo@duebell.test` (password `duebell-demo-2026`, or your `DEMO_PASSWORD`) before recording, so the video opens on the dashboard.
