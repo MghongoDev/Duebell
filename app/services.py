@@ -22,8 +22,12 @@ from app.paypal import WEBHOOKS_OFF, PayPalError, PayPalGateway, PayPalTimeout
 from app.risk import HistoryInvoice, RiskAssessment, score_invoice
 from app.validation import InvoiceProposal, proposal_to_cents
 
-PAID_STATUSES = {InvoiceStatus.PAID, InvoiceStatus.MARKED_AS_PAID}
-CLOSED_STATUSES = PAID_STATUSES | {InvoiceStatus.CANCELLED, InvoiceStatus.REFUNDED}
+# PayPal names several ways to be paid, refunded or cancelled. Duebell stores
+# each as PayPal names it and treats it as its plain form (issue #112).
+PAID_STATUSES = {InvoiceStatus.PAID, InvoiceStatus.MARKED_AS_PAID, InvoiceStatus.PAID_EXTERNAL}
+REFUNDED_STATUSES = {InvoiceStatus.REFUNDED, InvoiceStatus.MARKED_AS_REFUNDED, InvoiceStatus.REFUNDED_EXTERNAL}
+CANCELLED_STATUSES = {InvoiceStatus.CANCELLED, InvoiceStatus.AUTO_CANCELLED}
+CLOSED_STATUSES = PAID_STATUSES | REFUNDED_STATUSES | CANCELLED_STATUSES
 KNOWN_STATUSES = set(InvoiceStatus)
 # PayPal's statuses for a payment pending review, a part payment and a part
 # refund. Each leaves the invoice open (issue #112). Duebell keeps no paid
@@ -37,7 +41,7 @@ OWED_STATUSES = {InvoiceStatus.SENT, InvoiceStatus.OVERDUE} | PARTIAL_STATUSES
 # of them (issues #78, #79).
 SENT_STATUSES = OWED_STATUSES | PAID_STATUSES
 # Never part of a client's payment history (issue #46).
-NOT_HISTORY = {InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED}
+NOT_HISTORY = {InvoiceStatus.DRAFT} | CANCELLED_STATUSES
 
 EVENT_STATUS = {
     "INVOICING.INVOICE.SENT": InvoiceStatus.SENT,
@@ -396,16 +400,17 @@ def may_replace(current: str, new: str) -> bool:
     to SENT or OVERDUE. PAYMENT_PENDING may sit before or after a part
     payment, and may go back to SENT if the payment fails. Money out moves
     PAID -> PARTIALLY_REFUNDED -> REFUNDED, so a partly refunded invoice may
-    only become REFUNDED.
+    only become refunded. Each paid and refunded status stands for all of
+    PayPal's names for it.
     """
     if new not in KNOWN_STATUSES:
         return False
     if new == current:
         return True
     if current in CLOSED_STATUSES:
-        return current in PAID_STATUSES and new in {InvoiceStatus.PARTIALLY_REFUNDED, InvoiceStatus.REFUNDED}
+        return current in PAID_STATUSES and new in REFUNDED_STATUSES | {InvoiceStatus.PARTIALLY_REFUNDED}
     if current == InvoiceStatus.PARTIALLY_REFUNDED:
-        return new == InvoiceStatus.REFUNDED
+        return new in REFUNDED_STATUSES
     if current == InvoiceStatus.PARTIALLY_PAID:
         return new not in {InvoiceStatus.DRAFT, InvoiceStatus.SENT, InvoiceStatus.OVERDUE}
     return new != InvoiceStatus.DRAFT

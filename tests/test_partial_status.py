@@ -125,3 +125,71 @@ def test_refresh_moves_a_partly_paid_invoice_on_to_paid(client):
 )
 def test_partial_statuses_move_forward_only(current, new, allowed):
     assert may_replace(current, new) is allowed
+
+
+# PayPal's other closed statuses are stored as PayPal names them, like
+# MARKED_AS_PAID (issue #112).
+CLOSED_BY_PAYPAL = [
+    (PAID, "PAID_EXTERNAL", True),
+    (REFUNDED, "MARKED_AS_REFUNDED", False),
+    (REFUNDED, "REFUNDED_EXTERNAL", False),
+    ("INVOICING.INVOICE.CANCELLED", "AUTO_CANCELLED", False),
+]
+
+
+def assert_closed(client, invoice_id, draft_id, status, paid):
+    assert status_of(client, invoice_id) == status
+    assert draft_status(client, draft_id) == "REJECTED"
+    row = client.get("/api/invoices").json()[0]
+    assert row["closed"] is True
+    assert row["overdue"] is False
+    assert (row["paid_at"] is not None) is paid
+    assert totals(client)["outstanding"] == {}
+    assert totals(client)["paid"] == ({"USD": 120000} if paid else {})
+    assert client.post("/api/reminders/scan").json()["created"] == 0
+
+
+@pytest.mark.parametrize("event_type, status, paid", CLOSED_BY_PAYPAL)
+def test_a_webhook_with_a_closed_paypal_status_closes_the_invoice(client, event_type, status, paid):
+    invoice_id, draft_id = pending_draft(client)
+    response = client.post("/webhooks/paypal", content=event("WH-C1", event_type, paypal_id(client, invoice_id), status))
+    assert response.json()["applied"] is True
+    assert_closed(client, invoice_id, draft_id, status, paid)
+
+
+@pytest.mark.parametrize("event_type, status, paid", CLOSED_BY_PAYPAL)
+def test_a_refresh_that_finds_a_closed_paypal_status_closes_the_invoice(client, event_type, status, paid):
+    invoice_id, draft_id = pending_draft(client)
+    client.app.state.gateway.invoices[paypal_id(client, invoice_id)]["status"] = status
+    assert client.post(f"/api/invoices/{invoice_id}/refresh").json()["status"] == status
+    assert_closed(client, invoice_id, draft_id, status, paid)
+
+
+@pytest.mark.parametrize("status", ["UNPAID", "SCHEDULED", "SHARED"])
+def test_paypal_statuses_duebell_does_not_track_change_nothing(client, status):
+    invoice_id = seed_invoice(client)
+    pid = paypal_id(client, invoice_id)
+    client.post("/webhooks/paypal", content=event("WH-U1", PAID, pid, status))
+    assert status_of(client, invoice_id) == "SENT"
+    client.app.state.gateway.invoices[pid]["status"] = status
+    assert client.post(f"/api/invoices/{invoice_id}/refresh").json()["status"] == "SENT"
+
+
+@pytest.mark.parametrize(
+    "current, new, allowed",
+    [
+        ("PAID_EXTERNAL", "REFUNDED_EXTERNAL", True),
+        ("PAID_EXTERNAL", "MARKED_AS_REFUNDED", True),
+        ("PAID_EXTERNAL", "PARTIALLY_REFUNDED", True),
+        ("PAID", "MARKED_AS_REFUNDED", True),
+        ("PARTIALLY_REFUNDED", "REFUNDED_EXTERNAL", True),
+        ("PAID_EXTERNAL", "SENT", False),
+        ("AUTO_CANCELLED", "SENT", False),
+        ("AUTO_CANCELLED", "PAID", False),
+        ("MARKED_AS_REFUNDED", "PAID", False),
+        ("REFUNDED_EXTERNAL", "PARTIALLY_REFUNDED", False),
+        ("SENT", "AUTO_CANCELLED", True),
+    ],
+)
+def test_closed_paypal_statuses_move_forward_only(current, new, allowed):
+    assert may_replace(current, new) is allowed

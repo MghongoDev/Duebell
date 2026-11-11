@@ -332,9 +332,11 @@ button.ghost {
 
 .status-draft { background: #eee7da; color: #5c5140; }
 .status-sent { background: #dfe8f3; color: #24486d; }
-.status-paid { background: var(--green-soft); color: var(--green); }
+.status-paid,
+.status-paid_external { background: var(--green-soft); color: var(--green); }
 .status-overdue { background: var(--red-soft); color: var(--red); }
-.status-cancelled { background: #ececec; color: #555; }
+.status-cancelled,
+.status-auto_cancelled { background: #ececec; color: #555; }
 /* Open, with some money in, pending or refunded (issue #112). */
 .status-payment_pending,
 .status-partially_paid,

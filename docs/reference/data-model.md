@@ -43,8 +43,9 @@ Each set of values below has its own type in the code. The database stores the p
 | --- | --- |
 | `DRAFT` | Saved locally. If it has a `paypal_invoice_id`, PayPal holds a draft that has not been sent yet. |
 | `SENT` | PayPal sent it to the client. |
-| `PAID`, `MARKED_AS_PAID` | Paid. Both count toward history, collected totals and the risk comparison. |
-| `CANCELLED`, `REFUNDED` | Closed without payment, or refunded. |
+| `PAID`, `MARKED_AS_PAID`, `PAID_EXTERNAL` | Paid. `PAID_EXTERNAL` means the user recorded a payment made outside PayPal. All three set `paid_at`, close the invoice, and count toward history, collected totals and the risk comparison. |
+| `CANCELLED`, `AUTO_CANCELLED` | Closed without payment. PayPal sets `AUTO_CANCELLED` when no payment arrives in time. Neither counts as history. |
+| `REFUNDED`, `MARKED_AS_REFUNDED`, `REFUNDED_EXTERNAL` | Refunded, through PayPal, marked by the user, or outside PayPal. Closed. |
 | `OVERDUE` | Duebell never sets it, but a refresh stores it if PayPal reports it. The scan and the outstanding total treat it like `SENT`. |
 | `PAYMENT_PENDING` | The client paid, but PayPal holds the payment for review. Open. |
 | `PARTIALLY_PAID` | The client paid part of the amount. Open. |
@@ -54,7 +55,9 @@ The three partial statuses are open: the invoice still counts toward the outstan
 
 A webhook takes the status from the invoice the event carries. PayPal sends `INVOICING.INVOICE.PAID` for a full payment, a part payment or a pending one, and `INVOICING.INVOICE.REFUNDED` for a full or part refund. Only when the invoice carries no status does Duebell use the event type: `SENT`, `PAID`, `CANCELLED` or `REFUNDED`.
 
-A status only moves forward. A webhook or refresh never moves an invoice out of `PAID`, `MARKED_AS_PAID`, `CANCELLED` or `REFUNDED`, except from paid to `PARTIALLY_REFUNDED` or `REFUNDED`, and never moves it back to `DRAFT`. Money in runs `SENT` to `PARTIALLY_PAID` to `PAID`: a partly paid invoice never goes back to `SENT` or `OVERDUE`. `PAYMENT_PENDING` may come before or after a part payment, and may go back to `SENT` if the payment fails. Money out runs paid to `PARTIALLY_REFUNDED` to `REFUNDED`: a partly refunded invoice can only become `REFUNDED`. A webhook or refresh ignores any status not in this table, such as `UNKNOWN`, or PayPal statuses Duebell does not track, such as `UNPAID`. The dashboard's overdue flag is computed: an invoice is overdue when it is past its due date and not paid, cancelled or refunded.
+Duebell stores each status as PayPal names it, and treats `PAID_EXTERNAL` as paid, `MARKED_AS_REFUNDED` and `REFUNDED_EXTERNAL` as refunded, and `AUTO_CANCELLED` as cancelled. Any of them closes the invoice and rejects its pending reminder drafts.
+
+A status only moves forward. A webhook or refresh never moves an invoice out of a paid, refunded or cancelled status, except from paid to `PARTIALLY_REFUNDED` or to a refunded status, and never moves it back to `DRAFT`. Money in runs `SENT` to `PARTIALLY_PAID` to `PAID`: a partly paid invoice never goes back to `SENT` or `OVERDUE`. `PAYMENT_PENDING` may come before or after a part payment, and may go back to `SENT` if the payment fails. Money out runs paid to `PARTIALLY_REFUNDED` to `REFUNDED`: a partly refunded invoice can only become a refunded status. A webhook or refresh ignores any status not in this table, such as `UNKNOWN`. It also ignores three PayPal statuses: `UNPAID`, `SCHEDULED` and `SHARED`. None of them closes the invoice or changes what the client owes. The dashboard's overdue flag is computed: an invoice is overdue when it is past its due date and not paid, cancelled or refunded.
 
 `risk_reasons` holds one reason per line. `limited_data_reason` is the reason that says why a score has limited data, set when the invoice is scored. It is empty when the score has enough data, and the dashboard shows it under the "Limited data" label. Startup adds the column to an older database and leaves it empty on old rows, so they show "Limited data" alone.
 
