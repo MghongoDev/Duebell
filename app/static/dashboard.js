@@ -33,13 +33,22 @@ const riskCell = (params) => {
   return `<span class="risk risk-${params.value.toLowerCase()}">${escapeHtml(params.value)}</span><ul class="reasons">${reasons}${ld}</ul>`;
 };
 const actionsCell = (params) => {
+  // Send, Refresh and Simulate payment all ask PayPal about this invoice. An
+  // invoice PayPal never took has no PayPal ID, so it gets none (issue #125).
+  if (!params.data.paypal_invoice_id) return "";
+  const id = escapeHtml(params.data.id);
   // PayPal holds this draft but the send failed. Send it again, never create
   // a second PayPal invoice (issue #41).
-  const unsent = params.data.status === "DRAFT" && params.data.paypal_invoice_id;
-  const send = unsent ? `<button class="small" data-action="send" data-id="${params.data.id}">Send</button> ` : "";
-  const pay = params.data.closed ? "" : ` <button class="ghost small" data-action="pay" data-id="${params.data.id}">Simulate payment</button>`;
-  return `${send}<button class="ghost small" data-action="refresh" data-id="${params.data.id}">Refresh</button>${pay}`;
+  const unsent = params.data.status === "DRAFT";
+  const send = unsent ? `<button class="small" data-action="send" data-id="${id}">Send</button> ` : "";
+  const pay = params.data.closed ? "" : ` <button class="ghost small" data-action="pay" data-id="${id}">Simulate payment</button>`;
+  return `${send}<button class="ghost small" data-action="refresh" data-id="${id}">Refresh</button>${pay}`;
 };
+
+// OVERDUE matches PayPal's OVERDUE status and any open invoice past its due
+// date, which the server flags as overdue (issue #125).
+const statusMatches = (row, status) =>
+  !status || row.status === status || (status === "OVERDUE" && row.overdue);
 
 const gridState = { status: "", risk: "" };
 const gridOptions = {
@@ -59,7 +68,7 @@ const gridOptions = {
   rowClassRules: { "is-overdue": (params) => params.data.overdue },
   isExternalFilterPresent: () => gridState.status !== "" || gridState.risk !== "",
   doesExternalFilterPass: (node) =>
-    (!gridState.status || node.data.status === gridState.status) &&
+    statusMatches(node.data, gridState.status) &&
     (!gridState.risk || node.data.risk_level === gridState.risk),
   localeText: { noRowsToShow: "No invoices yet. Create the first one above." },
 };
