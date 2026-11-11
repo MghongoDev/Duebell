@@ -262,3 +262,18 @@ def test_a_reminder_without_a_stage_drafted_after_the_due_day_counts_as_overdue(
     _legacy_sent_reminder(client, invoice_id, AFTER_THE_DUE_DAY)
     with Session(client.app.state.engine) as session:
         assert _scan(client, session, AFTER_THE_DUE_DAY + timedelta(hours=1)) == []
+
+
+@pytest.mark.parametrize("status", ["PAYMENT_PENDING", "PARTIALLY_PAID", "PARTIALLY_REFUNDED"])
+def test_an_open_partial_status_follows_the_due_day_boundary(client, status):
+    invoice_id = _seed_due_at(client, DUE_AT, "LOW")
+    with Session(client.app.state.engine) as session:
+        invoice = session.get(Invoice, invoice_id)
+        invoice.status = status
+        session.add(invoice)
+        session.commit()
+        assert _scan(client, session, LATER_ON_THE_DUE_DAY) == []
+        [draft] = _scan(client, session, AFTER_THE_DUE_DAY)
+    assert draft.stage == "OVERDUE"
+    assert _overdue_flag(client, LATER_ON_THE_DUE_DAY) == (False, 0)
+    assert _overdue_flag(client, AFTER_THE_DUE_DAY) == (True, 1)

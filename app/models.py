@@ -60,6 +60,15 @@ class InvoiceStatus(StrEnum):
     CANCELLED = "CANCELLED"
     REFUNDED = "REFUNDED"
     OVERDUE = "OVERDUE"
+    # Still open: the client may owe some or all of the amount (issue #112).
+    PAYMENT_PENDING = "PAYMENT_PENDING"
+    PARTIALLY_PAID = "PARTIALLY_PAID"
+    PARTIALLY_REFUNDED = "PARTIALLY_REFUNDED"
+    # Closed: PayPal's other names for paid, refunded and cancelled (issue #112).
+    PAID_EXTERNAL = "PAID_EXTERNAL"
+    MARKED_AS_REFUNDED = "MARKED_AS_REFUNDED"
+    REFUNDED_EXTERNAL = "REFUNDED_EXTERNAL"
+    AUTO_CANCELLED = "AUTO_CANCELLED"
 
 
 class ReminderStatus(StrEnum):

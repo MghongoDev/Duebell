@@ -17,13 +17,14 @@ from sqlmodel import Session, or_, select, update
 
 from app.config import Settings
 from app.mailer import Mailer
-from app.models import Client, Invoice, InvoiceStatus, Reminder, ReminderStage, ReminderStatus, utcnow
+from app.models import Client, Invoice, Reminder, ReminderStage, ReminderStatus, utcnow
 from app.ownership import Scope, owned
 from app.paypal import PayPalError, PayPalGateway, PayPalTimeout
 from app.risk import RiskLevel
-from app.services import CLOSED_STATUSES, is_overdue, money, reject_drafts_if_closed
+from app.services import CLOSED_STATUSES, OWED_STATUSES, is_overdue, money, reject_drafts_if_closed
 
-REMINDABLE_STATUSES = {InvoiceStatus.SENT, InvoiceStatus.OVERDUE}
+# Every owed status, partial ones included (issue #112).
+REMINDABLE_STATUSES = OWED_STATUSES
 MAX_DRAFT_CHARS = 2_000
 
 
