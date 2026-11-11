@@ -35,8 +35,23 @@ class PayPalTimeout(PayPalError):
     """PayPal did not answer in time, and the call may still complete.
 
     The toolkit's HTTP call keeps running in its worker thread after the app
-    stops waiting, so the caller must not assume the action failed.
+    stops waiting, so the caller must not assume the action failed. The
+    sandbox gateway raises it when a call that changes something lost its
+    answer after the request went out (issue #113).
     """
+
+
+# Transport errors raised before the request left the app: PayPal never saw
+# the call, so it cannot have acted (issue #113). Every other transport error,
+# a read timeout or a dropped connection, may come after PayPal acted.
+NOT_SENT = (
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.PoolTimeout,
+    httpx.ProxyError,
+    httpx.UnsupportedProtocol,
+    httpx.LocalProtocolError,
+)
 
 
 def payment_term(terms_days: int, due_at: datetime) -> dict:
@@ -186,12 +201,22 @@ class SandboxPayPal:
         # a retry as the same request (issue #29). PayPal documents this for
         # creating invoices; send, remind and payments do not document it.
         request_id = str(uuid4()) if method in {"POST", "PUT"} else None
+        # Set once an attempt of a call that changes something failed after the
+        # request may have reached PayPal (issue #113).
+        answer_lost = False
 
         def send() -> httpx.Response:
+            nonlocal answer_lost
             headers = self._headers()
             if request_id:
                 headers["PayPal-Request-Id"] = request_id
-            response = self.client.request(method, url, headers=headers, **kwargs)
+            try:
+                response = self.client.request(method, url, headers=headers, **kwargs)
+            except NOT_SENT:
+                raise
+            except httpx.TransportError:
+                answer_lost = answer_lost or request_id is not None
+                raise
             if response.status_code == 429 or response.status_code >= 500:
                 raise RetryableFailure(f"PayPal returned {response.status_code}")
             return response
@@ -199,8 +224,14 @@ class SandboxPayPal:
         try:
             response = call_with_retries(send, base_delay=self.retry_delay)
         except (httpx.HTTPError, RetryableFailure) as exc:
+            if answer_lost:
+                raise PayPalTimeout(f"PayPal did not answer in time and may still act: {exc}") from exc
             raise PayPalError(f"PayPal could not be reached after retries: {exc}") from exc
         if response.status_code >= 400:
+            if answer_lost:
+                # An earlier attempt may have acted, so this refusal may be
+                # PayPal saying it already did (issue #113).
+                raise PayPalTimeout(f"PayPal did not answer in time and may still act: {response.text[:300]}")
             raise PayPalError(f"PayPal rejected the call: {response.text[:300]}")
         return response
 
