@@ -17,7 +17,7 @@ A freelancer finishes the work, sends the invoice, and then has to remember to c
 5. Handles a paid webhook, a manual refresh, and a mock payment. The next invoice sees the new history.
 6. Repeats an invoice, or splits a High-risk one into instalments. Each later invoice waits for approval.
 7. Sends an approved reminder through PayPal, email, or both, and never through the same channel twice.
-8. Keeps each user's clients and invoices apart, behind a sign-in.
+8. Keeps each user's clients and invoices apart, behind a sign-in. Five wrong passwords in 15 minutes lock an email, and a session cookie works only for the user it was issued to.
 
 ## How it uses PayPal
 
@@ -44,7 +44,7 @@ A freelancer finishes the work, sends the invoice, and then has to remember to c
 
 ## Built with
 
-Python 3.12+, FastAPI, Jinja2, HTMX, AG Grid Community, SQLModel, SQLite, APScheduler, httpx, scikit-learn for the side comparison, and pytest.
+Python 3.12+, FastAPI, Jinja2, HTMX, AG Grid Community, SQLModel, SQLite, APScheduler, httpx, PayPal's Agent Toolkit for the optional toolkit mode, scikit-learn for the side comparison, and pytest.
 
 ## Challenges
 
@@ -57,7 +57,7 @@ Python 3.12+, FastAPI, Jinja2, HTMX, AG Grid Community, SQLModel, SQLite, APSche
 - Calibrate risk on real, consented payment history.
 - Learn from the user's edits to improve the draft tone.
 - Split the risk comparison's held-out invoices by time rather than at random.
-- Confirm against the live sandbox which Invoicing endpoints honour the PayPal request ID.
+- Confirm that PayPal's send and reminder endpoints honour the PayPal request ID. The hand run showed that create does.
 - Add password reset and self-service sign-up.
 
 ## Deliberate limits
@@ -67,4 +67,5 @@ Duebell is a sandbox demo. Each account sees only its own records, but users are
 ## Links
 
 - Repository: https://github.com/MghongoDev/Duebell
+- Demo: add the Render URL before submitting.
 - Video: add the public video link before submitting.
