@@ -33,6 +33,14 @@ When approving a reminder, the user picks a [channel](../../GLOSSARY.md): PayPal
 
 Duebell records each channel the moment it succeeds. If email then fails, the reminder stays pending with an error, and approving it again sends only the email. PayPal never sends the same reminder twice. The activity feed lists a reminder once any channel has delivered it, even if the rest of the draft is later rejected. Such a rejected reminder's row names the channels that sent it, and it still counts as sent in its stage.
 
+## Tone
+
+The scan picks a draft's tone: firm for a High-risk invoice or one more than 14 days overdue, friendly otherwise. A pending draft shows a tone picker with its current tone selected. Picking Friendly or Firm rebuilds the draft from the invoice number, amount and due date in that tone. The draft keeps its stage, so its opening line still says "is due on" or "was due on" as before. The switch sends nothing; the user still approves the draft.
+
+A hand edit marks the draft's tone as edited. Switching the tone of an edited draft would replace the user's words, so the dashboard asks first, and the server refuses the switch until the user agrees. The dashboard also asks if the user has typed in the draft but not saved it.
+
+Only a pending draft can switch, and only the user's own. The switch leaves alone a draft an approval has claimed. The reminder records the tone the user picked in `chosen_tone`, apart from the tone the scan picked, and keeps it if the user then edits the text.
+
 ## Never sending twice
 
 Five failures could each lead to a duplicate. Duebell handles each one differently.

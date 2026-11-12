@@ -1,4 +1,4 @@
-"""Scanning, editing, approving and rejecting reminders (issues #15, #26, #48; ADR 0003)."""
+"""Scanning, editing, tone switching, approving and rejecting reminders (issues #15, #26, #48, #152; ADR 0003)."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ from app.models import Reminder, ReminderStatus
 from app.ownership import get_owned
 from app.paypal import PayPalError
 from app.reminders import (
+    TONES,
+    EditedDraft,
     draft_reminders,
     edit_reminder,
     parse_channels,
@@ -18,6 +20,7 @@ from app.reminders import (
     reminder_rows,
     send_reminder,
     sent_channels,
+    switch_tone,
 )
 from app.routes.common import current_user_id, get_session
 from app.schedules import draft_scheduled
@@ -97,6 +100,34 @@ def api_edit_reminder(
     except ValueError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
     return {"ok": True, "draft_text": reminder.draft_text}
+
+
+@router.post("/api/reminders/{reminder_id}/tone", response_class=JSONResponse)
+def api_switch_tone(
+    reminder_id: int,
+    request: Request,
+    tone: str = Form(""),
+    replace_edit: bool = Form(False),
+    session: Session = Depends(get_session),
+):
+    """Rebuild a pending draft as friendly or firm (issue #152).
+
+    A hand-edited draft answers 409 with "confirm": true until the user agrees
+    to lose their edits and posts again with replace_edit.
+    """
+    reminder = get_owned(session, Reminder, reminder_id, current_user_id(request))
+    if reminder is None:
+        return JSONResponse({"ok": False, "error": "Reminder not found."}, status_code=404)
+    if reminder.status != ReminderStatus.PENDING:
+        return JSONResponse({"ok": False, "error": "Only a pending draft can switch tone."}, status_code=409)
+    try:
+        switch_tone(session, reminder, tone, request.app.state.settings, replace_edit=replace_edit)
+    except EditedDraft as exc:
+        return JSONResponse({"ok": False, "error": str(exc), "confirm": True}, status_code=409)
+    except ValueError as exc:
+        status = 422 if tone not in TONES else 409
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=status)
+    return {"ok": True, "tone": reminder.tone, "draft_text": reminder.draft_text}
 
 
 @router.post("/api/reminders/{reminder_id}/reject", response_class=JSONResponse)
