@@ -225,6 +225,10 @@ class Reminder(SQLModel, table=True):
     # (issue #152). None if they never picked one, so the scan's choice
     # stands. A later hand edit sets tone to "custom" and keeps this.
     chosen_tone: Optional[str] = None
+    # Why the draft started in its tone, shown on the dashboard (issue #153),
+    # e.g. "You sent Firm to this client last time." None when the scan's
+    # rule chose it. A tone switch or a hand edit clears it.
+    tone_reason: Optional[str] = None
 
 
 class Event(SQLModel, table=True):
