@@ -31,7 +31,7 @@ Install the test and lint tools first: `.venv/bin/pip install -r requirements-de
 | `scripts/smoke.py` | Resets a scratch database, `/tmp/duebell-smoke.db`, three times and runs the whole demo through the HTTP routes each time: sign in, parse, create, scan, approve the reminder, simulate payment, replay the webhook, refresh. Prints `Smoke: pass` or the step that failed. |
 | `scripts/evals.py` | Ten reminder cases and a webhook replay check, offline. The ten parsing cases run only in live mode with credentials; otherwise the script says it skipped them. Exits non-zero on any failure. |
 | `scripts/evals.py --live` | Forces the parsing cases. Fails if live mode has no credentials. |
-| `scripts/train_risk.py` | Fits logistic regression on synthetic histories and prints held-out accuracy and AUC beside the rule baseline. |
+| `scripts/train_risk.py` | Fits logistic regression on the older three quarters of a synthetic history, by issue date, and prints accuracy and AUC on the newest quarter beside the rule baseline. |
 
 ## PayPal
 

@@ -103,4 +103,4 @@ The unique index `ux_reminder_pending_invoice` allows one `PENDING` reminder per
 
 ### Risk comparison
 
-`OK` with the four scores, or `NOT_ENOUGH_HISTORY` with a message saying how many invoices it found.
+`OK` with the four scores, or `NOT_ENOUGH_HISTORY` with a message saying how many invoices it found. The scores come from the newest quarter of invoices by issue date, and `test_rows` counts them. An `OK` message names the issue dates the comparison held out. A refit is also `NOT_ENOUGH_HISTORY` when the held-out invoices, or the older ones it trains on, are all late or all on time.

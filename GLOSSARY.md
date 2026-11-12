@@ -133,7 +133,7 @@ A runtime mode that sends, reminds, records payments and reads status through Pa
 _Avoid_: Agent mode, AI mode
 
 **Risk comparison**:
-A logistic regression refit on one user's invoices with known outcomes, scored on held-out invoices beside the rule baseline. It informs; it never replaces the rule baseline.
+A logistic regression refit on one user's invoices with known outcomes, trained on older invoices and scored on the newest quarter, by issue date, beside the rule baseline. It informs; it never replaces the rule baseline.
 _Avoid_: Model, retrained score
 
 **Scope**:
