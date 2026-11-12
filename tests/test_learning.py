@@ -71,7 +71,9 @@ def test_refit_on_enough_history_reports_both_models():
         result = refit(session, user_id=owner_id)
     assert result.status == "OK"
     assert result.rows_used == 72
-    assert result.test_rows == 18
+    # Every client issued on the same six days. A quarter is 18 rows, which cuts the
+    # fifth day in two, so all 12 of that day's invoices join the held-out side (issue #148).
+    assert result.test_rows == 24
     for value in (result.baseline_accuracy, result.baseline_auc, result.logistic_accuracy, result.logistic_auc):
         assert 0.0 <= value <= 1.0
     assert result.logistic_auc > 0.6
@@ -140,3 +142,73 @@ def test_scope_is_required_and_a_refit_never_spans_users():
             training_rows(session, scope=None)
         with pytest.raises(TypeError):
             refit(session, user_id=EVERY_USER)
+
+
+def _set_outcome(session, owner_id, steps, *, late):
+    """Mark the invoices issued at the given steps of `add_history` as paid late or on time."""
+    from sqlmodel import select
+
+    for invoice in session.exec(select(Invoice).where(Invoice.user_id == owner_id)).all():
+        if int(invoice.invoice_number.split("-")[2]) in steps:
+            invoice.paid_at = invoice.due_at + (timedelta(days=10) if late else -timedelta(days=2))
+            session.add(invoice)
+    session.commit()
+
+
+def test_split_holds_out_the_newest_quarter():
+    from app.learning import split_by_issue_date
+
+    start = utcnow() - timedelta(days=100)
+    rows = [{"issued_at": start + timedelta(days=day), "late": day % 2} for day in range(40)]
+    random.Random(3).shuffle(rows)
+    older, newest = split_by_issue_date(rows)
+    assert len(newest) == 10
+    assert len(older) == 30
+    assert max(row["issued_at"] for row in older) < min(row["issued_at"] for row in newest)
+    assert {row["issued_at"] for row in newest} == {start + timedelta(days=day) for day in range(30, 40)}
+
+
+def test_split_keeps_invoices_issued_together_on_the_held_out_side():
+    from app.learning import split_by_issue_date
+
+    start = utcnow() - timedelta(days=100)
+    # Eight invoices on each of five dates. A quarter is ten, which cuts the fourth date in two.
+    rows = [{"issued_at": start + timedelta(days=day), "late": n % 2} for day in range(5) for n in range(8)]
+    older, newest = split_by_issue_date(rows)
+    assert len(newest) == 16
+    assert max(row["issued_at"] for row in older) < min(row["issued_at"] for row in newest)
+
+
+def test_refit_trains_on_older_invoices_and_names_the_held_out_dates():
+    db = engine()
+    with Session(db) as session:
+        owner_id = add_history(session)
+        rows = training_rows(session, scope=owner_id)
+        result = refit(session, user_id=owner_id)
+    newest = sorted(row["issued_at"] for row in rows)[-result.test_rows:]
+    assert result.status == "OK"
+    assert newest[0].strftime("%d %b %Y") in result.message
+    assert newest[-1].strftime("%d %b %Y") in result.message
+
+
+def test_refit_says_too_little_data_when_the_newest_quarter_lacks_an_outcome():
+    db = engine()
+    with Session(db) as session:
+        owner_id = add_history(session)
+        # Every client issued on the same days, so steps 4 and 5 form the newest quarter.
+        _set_outcome(session, owner_id, {4, 5}, late=True)
+        result = refit(session, user_id=owner_id)
+    assert result.status == "NOT_ENOUGH_HISTORY"
+    assert result.logistic_auc is None
+    assert "All of the newest invoices were late." in result.message
+
+
+def test_refit_says_too_little_data_when_the_older_invoices_lack_an_outcome():
+    db = engine()
+    with Session(db) as session:
+        owner_id = add_history(session)
+        _set_outcome(session, owner_id, {0, 1, 2, 3}, late=True)
+        result = refit(session, user_id=owner_id)
+    assert result.status == "NOT_ENOUGH_HISTORY"
+    assert result.logistic_auc is None
+    assert "All of the older invoices were late." in result.message

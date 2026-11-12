@@ -11,6 +11,7 @@ BOOLEAN_SETTINGS = {
     "MOCK_WEBHOOKS": ("mock_webhooks", False),
     "SMTP_STARTTLS": ("smtp_starttls", True),
     "COOKIE_SECURE": ("cookie_secure", False),
+    "SIGNUP_ENABLED": ("signup_enabled", False),
 }
 
 WORDS = [

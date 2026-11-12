@@ -1,6 +1,6 @@
 # Add a user
 
-There is no sign-up page. Whoever runs the server adds each user from the command line.
+Whoever runs the server can add each user from the command line. If `SIGNUP_ENABLED` is on, visitors can also sign up themselves; see [Let visitors sign up](#let-visitors-sign-up).
 
 ```bash
 .venv/bin/python scripts/create_user.py you@example.com
@@ -9,6 +9,16 @@ There is no sign-up page. Whoever runs the server adds each user from the comman
 The script asks for a password of 10 to 1,024 characters. To pass it without a prompt, set `DUEBELL_PASSWORD` for that one command.
 
 Each user sees only their own clients, invoices, reminders and schedules. Two users may bill the same client email.
+
+## Let visitors sign up
+
+Sign-up is off by default, and `render.yaml` leaves it off. To turn it on, set `SIGNUP_ENABLED=true` and restart the app. The sign-in page then links to `/signup`. While it is off, `/signup` answers `404`.
+
+A visitor enters an email and a password. Sign-up refuses the same emails and passwords as the script, with the same messages. A new account starts empty.
+
+Sign-up does not sign the visitor in. It shows the sign-in page with the email filled in, and the visitor signs in with the password they chose. It shows that same page when the email already has an account, and changes nothing about that account, so the page does not say which emails are registered. See [security](../explanation/security.md#sign-up) for what this does and does not hide.
+
+The whole app accepts 20 sign-up attempts per 15 minutes. After that, sign-up answers `429` until the oldest attempt is 15 minutes old.
 
 ## Adopt an older database
 

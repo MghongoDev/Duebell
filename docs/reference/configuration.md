@@ -4,7 +4,7 @@ Duebell reads its settings from environment variables when it starts. It also lo
 
 The defaults run the whole demo with no credentials. A blank value, such as `ANTHROPIC_MODEL=` in `.env.example`, counts as unset, so the default applies.
 
-On/off settings (`MOCK_WEBHOOKS`, `SMTP_STARTTLS`, `COOKIE_SECURE`) accept `on`, `yes`, `true` or `1` for on, and `off`, `no`, `false` or `0` for off. Case and surrounding spaces do not matter. Any other value stops Duebell at start with an error that names the setting.
+On/off settings (`MOCK_WEBHOOKS`, `SMTP_STARTTLS`, `COOKIE_SECURE`, `SIGNUP_ENABLED`) accept `on`, `yes`, `true` or `1` for on, and `off`, `no`, `false` or `0` for off. Case and surrounding spaces do not matter. Any other value stops Duebell at start with an error that names the setting.
 
 ## Modes
 
@@ -58,6 +58,7 @@ If live mode lacks a credential or a base URL, parsing falls back to the mock pa
 | --- | --- | --- |
 | `SECRET_KEY` | empty | Signs the session cookie. If empty, Duebell makes a random key at start, and every session ends when the process restarts. |
 | `COOKIE_SECURE` | `false` | On/off. Turn it on behind HTTPS so browsers send the cookie only over HTTPS. |
+| `SIGNUP_ENABLED` | `false` | On/off. Lets visitors create their own accounts at `/signup`. While off, `/signup` answers `404` and the sign-in page does not link to it. `render.yaml` leaves it off. See [Add a user](../how-to/add-a-user.md#let-visitors-sign-up). |
 | `DEMO_PASSWORD` | empty | The password the seed gives `demo@duebell.test`. If empty, the seed uses `duebell-demo-2026`, unless it runs with `--require-password`. |
 | `DUEBELL_PASSWORD` | empty | Read only by `scripts/create_user.py`, instead of prompting. |
 | `PUBLIC_URL` | empty | The address users open Duebell at, such as `https://duebell.example.com`. Password reset links point here. In `smtp` mode Duebell sends no reset link without it. In `mock` mode it falls back to the address the request came to. |
@@ -93,6 +94,7 @@ These are constants in the code, not settings.
 | Repeats | 1 to 60, or no end |
 | Session length | 12 hours |
 | Sign-in attempts before a lockout | 5 within 15 minutes, counted before the password check. A correct password clears the count. |
+| Sign-up attempts | 20 per 15 minutes for the whole app, counted after the email and password pass their checks. |
 | Emails the lockout tracks | 10,000. Entries expire after 15 minutes. A locked email is never dropped; while every entry is locked, a new email is refused. |
 | Password reset requests | 5 per email within 15 minutes, counted apart from sign-in attempts. A request over the limit gets the same answer and sends nothing. |
 | Password reset link | Works once, for 30 minutes. A new password ends every link the user has. |

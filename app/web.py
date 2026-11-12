@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session
 from starlette.concurrency import run_in_threadpool
 
-from app.auth import COOKIE_NAME, Lockout, read_session_cookie, session_key_matches
+from app.auth import COOKIE_NAME, Lockout, SignupLimit, read_session_cookie, session_key_matches
 from app.config import Settings, get_settings
 from app.jobs import start_scheduler, stop_scheduler
 from app.llm import build_parser
@@ -34,7 +34,8 @@ from app.schedules import release_interrupted
 
 # /logout is public so it clears the cookie and redirects even when the
 # session has already expired (issue #84). It only ever signs out.
-PUBLIC_PATHS = {"/login", "/logout", "/healthz", "/webhooks/paypal"}
+# /signup answers 404 itself while SIGNUP_ENABLED is off (issue #150).
+PUBLIC_PATHS = {"/login", "/logout", "/signup", "/healthz", "/webhooks/paypal"}
 # Someone who forgot their password has no session (issue #151).
 PUBLIC_PATHS |= {"/forgot-password", "/reset-password"}
 # Routes called by scripts, not by a page or form; without a session they
@@ -123,6 +124,7 @@ def create_app(
     app.state.lockout = Lockout()
     # Reset requests count per email like sign-ins, in a table of their own (issue #151).
     app.state.reset_lockout = Lockout()
+    app.state.signup_limit = SignupLimit()
 
     @app.middleware("http")
     async def require_sign_in(request: Request, call_next):

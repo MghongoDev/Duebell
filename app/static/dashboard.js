@@ -230,6 +230,53 @@ document.addEventListener("click", (event) => {
   runAction(button, "Working...", `/api/reminders/${id}/${action}`);
 });
 
+// A tone switch rebuilds the draft from the invoice facts. Ask first if it
+// would replace the user's own words: a saved hand edit, or typing not yet
+// saved (issue #152).
+function toneSwitchOverwrites(picker, field) {
+  return picker.dataset.edited === "true" || Boolean(field && field.value !== field.defaultValue);
+}
+
+const TONE_CONFIRM = "Switching the tone replaces your own words in this draft. Switch anyway?";
+
+document.addEventListener("change", async (event) => {
+  const picker = event.target.closest("[data-tone-for]");
+  if (!picker) return;
+  const id = picker.dataset.toneFor;
+  const restore = () => {
+    picker.disabled = false;
+    picker.value = picker.querySelector("option[selected]")?.value ?? "";
+  };
+  const overwrites = toneSwitchOverwrites(picker, document.querySelector(`[data-draft-id="${id}"]`));
+  if (overwrites && !window.confirm(TONE_CONFIRM)) {
+    restore();
+    return;
+  }
+  // The server refuses to replace a saved edit unless the user agreed here.
+  const body = new URLSearchParams({ tone: picker.value, replace_edit: overwrites ? "true" : "false" });
+  picker.disabled = true;
+  clearError();
+  let response;
+  try {
+    response = await fetch(`/api/reminders/${id}/tone`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+  } catch (error) {
+    showError(NO_CONNECTION);
+    restore();
+    return;
+  }
+  const data = await readJson(response);
+  if (!data || !response.ok) {
+    showError(data ? data.error || "That did not work." : serverError(response));
+    restore();
+    return;
+  }
+  window.location.reload();
+});
+
 document.querySelector(".invoice-form").addEventListener("input", (event) => {
   event.target.classList.remove("missing");
   event.target.removeAttribute("aria-invalid");

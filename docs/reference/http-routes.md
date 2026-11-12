@@ -1,6 +1,6 @@
 # HTTP routes
 
-Every route needs a signed-in user except the public paths: `/login`, `/logout`, `/forgot-password`, `/reset-password`, `/healthz`, `/static/...` and `/webhooks/paypal` ([ADR 0008](../adr/0008-sign-in-and-ownership.md)). Without a valid session, as after the 12-hour expiry, a page or form post redirects to `/login` with `303`. Routes under `/api/` and `POST /parse` return `401` with `{"ok": false, "error": "Sign in first."}` instead.
+Every route needs a signed-in user except the public paths: `/login`, `/logout`, `/signup`, `/forgot-password`, `/reset-password`, `/healthz`, `/static/...` and `/webhooks/paypal` ([ADR 0008](../adr/0008-sign-in-and-ownership.md)). Without a valid session, as after the 12-hour expiry, a page or form post redirects to `/login` with `303`. Routes under `/api/` and `POST /parse` return `401` with `{"ok": false, "error": "Sign in first."}` instead.
 
 Each route acts only on the signed-in user's records. Another user's record gets the same `404` as a missing one.
 
@@ -13,6 +13,8 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 | `GET` | `/healthz` | Returns `{"ok": true, "service": "duebell"}`. It does not query the database or PayPal. |
 | `GET` | `/login` | The sign-in page. |
 | `POST` | `/login` | Fields `email`, `password`. Sets the session cookie and redirects to `/`. A wrong password, a locked email, an email over 254 characters or without `@`, or a password over 1,024 characters returns `401` with the page. An `Origin` header naming another host returns `403`. |
+| `GET` | `/signup` | The sign-up page. `404` while `SIGNUP_ENABLED` is off. |
+| `POST` | `/signup` | Fields `email`, `password`. Creates an empty account and returns `200` with the sign-in page; it sets no cookie. An email that already has an account gets the same page and changes nothing. A bad email or password returns `400` with the sign-up page and the same message as `scripts/create_user.py`. Over 20 attempts in 15 minutes returns `429`. An `Origin` header naming another host returns `403`. `404` while `SIGNUP_ENABLED` is off. |
 | `POST` | `/logout` | Clears the cookie and redirects to `/login`, with or without a valid session. |
 | `GET` | `/forgot-password` | Public. The page that asks for an email to reset a password. |
 | `POST` | `/forgot-password` | Public. Field `email`. Always `200` with the same message. If the email has a user and is under the request limit, emails a reset link after answering. An `Origin` header naming another host returns `403`. |
@@ -45,7 +47,8 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 | --- | --- | --- |
 | `POST` | `/api/reminders/scan` | Drafts reminders and moves due scheduled invoices to pending. Sends nothing. Returns `{"created": n, "scheduled": m}`. |
 | `GET` | `/api/reminders` | The user's reminders, newest first. |
-| `POST` | `/api/reminders/{reminder_id}/edit` | Field `draft_text`. Saves a new draft. `409` unless the draft is pending. |
+| `POST` | `/api/reminders/{reminder_id}/edit` | Field `draft_text`. Saves a new draft and sets its `tone` to `custom`. `409` unless the draft is pending. |
+| `POST` | `/api/reminders/{reminder_id}/tone` | Fields `tone` (`friendly` or `firm`) and `replace_edit` (default `false`). Rebuilds the draft from the invoice facts in that tone and records it in `chosen_tone`. Returns `tone` and `draft_text`. `404` if the reminder is not the user's. `409` unless the draft is pending. `409` with `"confirm": true` if the draft was edited by hand and `replace_edit` is not `true`; the draft is unchanged. `422` for any other tone. |
 | `POST` | `/api/reminders/{reminder_id}/approve` | Field `channel`: `paypal` (the default), `email` or `both`. Sends through each channel not yet used. Returns `status`, `sent_channels`, and a `warning` if PayPal did not confirm in time. `409` if the draft is not pending, another approval holds it, or the invoice has no PayPal ID. `409` too if the invoice is paid, cancelled or refunded; the draft is then marked `REJECTED`. `502` if a channel fails; the draft stays pending. |
 | `POST` | `/api/reminders/{reminder_id}/reject` | Marks the draft `REJECTED`. A later scan may draft a new one. |
 

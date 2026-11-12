@@ -1,6 +1,7 @@
 """Add a Duebell user from the command line (issue #24, ADR 0008).
 
-There is no public sign-up. Whoever runs the server adds each user here:
+Whoever runs the server adds users here. Visitors can also sign up at
+/signup while SIGNUP_ENABLED is on (issue #150), under the same limits:
 
     .venv/bin/python scripts/create_user.py you@example.com
     .venv/bin/python scripts/create_user.py you@example.com --claim

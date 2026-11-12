@@ -4,7 +4,7 @@ Duebell is a sandbox demo, but it can be hosted for several people. This page ex
 
 ## Sign-in
 
-- A middleware turns away every request without a valid session, except a few public paths: sign-in, sign-out, the two password reset pages, `/healthz`, static files and the PayPal webhook. Sign-out is public so an expired session can still sign out; it only clears the cookie. A page or form post without a session redirects to sign-in, and a JSON route answers `401`. It denies by default, so a new route is protected without extra code. A test lists every route and checks this.
+- A middleware turns away every request without a valid session, except a few public paths: sign-in, sign-out, sign-up, the two password reset pages, `/healthz`, static files and the PayPal webhook. Sign-out is public so an expired session can still sign out; it only clears the cookie. A page or form post without a session redirects to sign-in, and a JSON route answers `401`. It denies by default, so a new route is protected without extra code. A test lists every route and checks this.
 - Duebell hashes passwords with scrypt and a random salt. Each hash records its cost, so the cost can rise later.
 - The session is a cookie holding the user ID, the user's session key and an expiry, signed with `SECRET_KEY`. It is HttpOnly, SameSite=Lax, and Secure when `COOKIE_SECURE=true`. It lasts 12 hours.
 - Each user has a random session key, stored with the user. The middleware accepts a cookie only while its key matches the user's current key. User IDs can repeat: a demo reset empties the tables, and SQLite then gives the next user the ID of a deleted one. The new user has a new key, so a cookie issued to the deleted user does not sign anyone in.
@@ -16,7 +16,17 @@ Duebell is a sandbox demo, but it can be hosted for several people. This page ex
 - Sign-in refuses an email no user can have, one over 254 characters or without an `@`, and a password over 1,024 characters, before the lockout counts the attempt or hashes the password. So junk cannot fill the table, and locking an email costs a full password hash per attempt. Both get the same message as a wrong password. `scripts/create_user.py` applies the same limits.
 - The lockout tracks at most 10,000 emails. It drops attempts older than 15 minutes, and an email with none left. When the table is full and a new email signs in, it drops the least recent email that is not locked. It never drops a locked email, so a flood of new emails cannot free one. If every email in the table is locked, sign-in refuses any new email with the same "Too many failed attempts" message and stores nothing; emails already in the table carry on as before.
 - A full table of locked emails frees itself. Each locked email unlocks when its oldest attempt turns 15 minutes old, and the next new email takes its place. So once a flood stops, new emails can sign in again within 15 minutes. To keep the table full, an attacker must lock 10,000 emails every 15 minutes: 50,000 sign-in attempts, each a full password hash.
-- There is no public sign-up. Whoever runs the server adds users with `scripts/create_user.py`.
+- Whoever runs the server adds users with `scripts/create_user.py`, unless sign-up is on. See below.
+
+## Sign-up
+
+Sign-up is off unless `SIGNUP_ENABLED` is on. While it is off, `/signup` answers `404` and the sign-in page does not link to it. The Render blueprint leaves it off.
+
+- Sign-up refuses the same emails and passwords as `scripts/create_user.py`. A new user gets an empty account and a new session key.
+- The form passes the same `Origin` check as sign-in.
+- Sign-up does not sign the visitor in. Whether the email is new or already has an account, the visitor sees the same sign-in page with the same message, and gets no cookie. A taken email changes nothing about its account, and costs the same password hash as a new one, so the timing is close too.
+- This hides less than it seems. Duebell does not check that a visitor owns the email. So anyone can sign up with an email and a password of their choosing, then try to sign in with it. If that works, the email was free, and they now hold an account under it. If it fails, the email was taken. Each such test costs one sign-up and one counted sign-in attempt. Hiding it fully needs an email that proves ownership before the account exists.
+- The whole app accepts 20 sign-up attempts per 15 minutes. Each sign-up names a new email, so a count per email, as sign-in uses, would never fill. One count for everyone caps how fast anyone can add accounts or test emails. The cost is that someone who sends many attempts also turns honest visitors away, with `429`, until the oldest attempt is 15 minutes old. Sign-up refuses bad input before it counts, so typos do not use up the count. Like the lockout, the count lives in process memory.
 
 ## Password reset
 
@@ -67,7 +77,7 @@ img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors
 - Signing a single user out everywhere means giving them a new session key in the database; a password reset does it, and there is no other route or script for it. Changing `SECRET_KEY` signs everyone out.
 - The lockout lives in process memory. A restart clears it.
 - Anyone can keep the demo account locked by sending five wrong passwords every 15 minutes. The lockout counts attempts per email, not per client. Counting per client address would mean trusting the `X-Forwarded-For` header that Render's proxy adds, and any client can forge that header, so an attacker could make unlimited guesses by sending a new address each time. Duebell keeps counting per email.
-- There is no email check on new users.
+- There is no email check on new users. With sign-up on, anyone can make accounts under emails they do not own, and can learn whether an email is registered, as described above.
 - SQLite and a single process: no running several copies of the app.
 
 ## Before hosting

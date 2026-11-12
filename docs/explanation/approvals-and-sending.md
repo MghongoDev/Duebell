@@ -33,6 +33,18 @@ When approving a reminder, the user picks a [channel](../../GLOSSARY.md): PayPal
 
 Duebell records each channel the moment it succeeds. If email then fails, the reminder stays pending with an error, and approving it again sends only the email. PayPal never sends the same reminder twice. The activity feed lists a reminder once any channel has delivered it, even if the rest of the draft is later rejected. Such a rejected reminder's row names the channels that sent it, and it still counts as sent in its stage.
 
+## Tone
+
+Duebell remembers the tone the user last sent each client. When the scheduler or **Scan now** drafts a reminder, it looks for the latest reminder the same user sent to the same client in a tone they picked with the tone switch. If it finds one, the draft starts in that tone and says why, for example "You sent Friendly to this client last time." The latest is the one with the latest send time. Only a sent reminder counts: a pending or rejected draft does not, and neither does a reminder the user sent in the tone the scan picked. Each user's choices stay their own, even when two users bill a client with the same name and email.
+
+Without a remembered tone, the scan picks it: firm for a High-risk invoice or one more than 14 days overdue, friendly otherwise. A remembered tone wins over this rule, so a client the user last sent Friendly gets a friendly draft even when the invoice is High risk.
+
+A pending draft shows a tone picker with its current tone selected. Picking Friendly or Firm rebuilds the draft from the invoice number, amount and due date in that tone. The draft keeps its stage, so its opening line still says "is due on" or "was due on" as before. The switch sends nothing; the user still approves the draft.
+
+A hand edit marks the draft's tone as edited. Switching the tone of an edited draft would replace the user's words, so the dashboard asks first, and the server refuses the switch until the user agrees. The dashboard also asks if the user has typed in the draft but not saved it.
+
+Only a pending draft can switch, and only the user's own. The switch leaves alone a draft an approval has claimed. The reminder records the tone the user picked in `chosen_tone`, apart from the tone the scan picked, and keeps it if the user then edits the text. Switching the tone or editing the text removes the reason a remembered tone gave, since the draft is then the user's own choice.
+
 ## Never sending twice
 
 Five failures could each lead to a duplicate. Duebell handles each one differently.

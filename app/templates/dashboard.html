@@ -176,9 +176,20 @@
       {% if reminder.sent_channels %}
       <p class="hint">Already sent via {{ reminder.sent_channels|map(attribute='label')|join(' and ') }}. Approving again sends only the rest.</p>
       {% endif %}
+      {% if reminder.tone_reason %}
+      <p class="hint" data-tone-reason-for="{{ reminder.id }}">{{ reminder.tone_reason }}</p>
+      {% endif %}
       <textarea class="draft-edit" data-draft-id="{{ reminder.id }}" rows="6">{{ reminder.draft_text }}</textarea>
       <div class="row-actions">
         <button class="ghost small" data-reminder-action="save" data-id="{{ reminder.id }}">Save draft</button>
+        <label class="channel-pick">
+          <span class="sr-only">Tone</span>
+          <select data-tone-for="{{ reminder.id }}" data-edited="{{ 'true' if reminder.tone == 'custom' else 'false' }}" aria-label="Tone">
+            {% if reminder.tone == 'custom' %}<option value="" selected disabled>Edited</option>{% endif %}
+            <option value="friendly"{% if reminder.tone == 'friendly' %} selected{% endif %}>Friendly</option>
+            <option value="firm"{% if reminder.tone == 'firm' %} selected{% endif %}>Firm</option>
+          </select>
+        </label>
         <label class="channel-pick">
           <span class="sr-only">Send via</span>
           <select data-channel-for="{{ reminder.id }}" aria-label="Send via">
