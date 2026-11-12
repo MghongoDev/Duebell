@@ -68,4 +68,4 @@ Duebell is a sandbox demo. Each account sees only its own records, but users are
 
 - Repository: https://github.com/MghongoDev/Duebell
 - Demo: add the Render URL before submitting.
-- Video: add the public video link before submitting.
+- Video: https://youtu.be/3WWXc2XM2-g
