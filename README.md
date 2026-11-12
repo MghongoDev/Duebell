@@ -6,7 +6,7 @@ It helps freelancers and small businesses get paid. You describe a job in plain 
 
 ![Duebell dashboard](docs/dashboard.png)
 
-Watch the [demo video](https://youtu.be/3WWXc2XM2-g) (under 3 minutes).
+Watch the [demo video](https://youtu.be/3WWXc2XM2-g) (under 3 minutes), or try the [hosted demo](https://duebell-g2wv.onrender.com) in mock mode.
 
 ## Quick start
 
