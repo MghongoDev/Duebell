@@ -180,6 +180,14 @@
       <div class="row-actions">
         <button class="ghost small" data-reminder-action="save" data-id="{{ reminder.id }}">Save draft</button>
         <label class="channel-pick">
+          <span class="sr-only">Tone</span>
+          <select data-tone-for="{{ reminder.id }}" data-edited="{{ 'true' if reminder.tone == 'custom' else 'false' }}" aria-label="Tone">
+            {% if reminder.tone == 'custom' %}<option value="" selected disabled>Edited</option>{% endif %}
+            <option value="friendly"{% if reminder.tone == 'friendly' %} selected{% endif %}>Friendly</option>
+            <option value="firm"{% if reminder.tone == 'firm' %} selected{% endif %}>Firm</option>
+          </select>
+        </label>
+        <label class="channel-pick">
           <span class="sr-only">Send via</span>
           <select data-channel-for="{{ reminder.id }}" aria-label="Send via">
             {% if not reminder.paypal_sent %}

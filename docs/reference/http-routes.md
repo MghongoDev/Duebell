@@ -41,7 +41,8 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 | --- | --- | --- |
 | `POST` | `/api/reminders/scan` | Drafts reminders and moves due scheduled invoices to pending. Sends nothing. Returns `{"created": n, "scheduled": m}`. |
 | `GET` | `/api/reminders` | The user's reminders, newest first. |
-| `POST` | `/api/reminders/{reminder_id}/edit` | Field `draft_text`. Saves a new draft. `409` unless the draft is pending. |
+| `POST` | `/api/reminders/{reminder_id}/edit` | Field `draft_text`. Saves a new draft and sets its `tone` to `custom`. `409` unless the draft is pending. |
+| `POST` | `/api/reminders/{reminder_id}/tone` | Fields `tone` (`friendly` or `firm`) and `replace_edit` (default `false`). Rebuilds the draft from the invoice facts in that tone and records it in `chosen_tone`. Returns `tone` and `draft_text`. `404` if the reminder is not the user's. `409` unless the draft is pending. `409` with `"confirm": true` if the draft was edited by hand and `replace_edit` is not `true`; the draft is unchanged. `422` for any other tone. |
 | `POST` | `/api/reminders/{reminder_id}/approve` | Field `channel`: `paypal` (the default), `email` or `both`. Sends through each channel not yet used. Returns `status`, `sent_channels`, and a `warning` if PayPal did not confirm in time. `409` if the draft is not pending, another approval holds it, or the invoice has no PayPal ID. `409` too if the invoice is paid, cancelled or refunded; the draft is then marked `REJECTED`. `502` if a channel fails; the draft stays pending. |
 | `POST` | `/api/reminders/{reminder_id}/reject` | Marks the draft `REJECTED`. A later scan may draft a new one. |
 

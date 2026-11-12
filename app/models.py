@@ -221,6 +221,10 @@ class Reminder(SQLModel, table=True):
     # BEFORE_DUE or OVERDUE, set when drafted (issue #42). A row from an older
     # build has none; the scan infers it from created_at and the due date.
     stage: Optional[str] = None
+    # The tone the user picked with the tone switch, "friendly" or "firm"
+    # (issue #152). None if they never picked one, so the scan's choice
+    # stands. A later hand edit sets tone to "custom" and keeps this.
+    chosen_tone: Optional[str] = None
 
 
 class Event(SQLModel, table=True):

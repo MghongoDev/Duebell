@@ -1,4 +1,4 @@
-"""Reminder drafting, editing, approval, and rejection (issues #15, #24, #26, #40, #42; ADR 0003).
+"""Reminder drafting, editing, tone switching, approval, and rejection (issues #15, #24, #26, #40, #42, #152; ADR 0003).
 
 Scanning only creates drafts. A human must edit or approve a draft before
 Duebell asks PayPal to send a reminder. The draft uses only facts already on
@@ -53,18 +53,33 @@ def reminder_stage(invoice: Invoice, now: datetime) -> ReminderStage:
     return ReminderStage.BEFORE_DUE
 
 
+# The tones a user can pick for a draft (issue #152). A hand edit makes it "custom".
+TONES = ("friendly", "firm")
+
+
 def reminder_text(
     invoice: Invoice,
     client: Client,
     settings: Settings,
     now: datetime | None = None,
+    *,
+    tone: str | None = None,
+    stage: ReminderStage | None = None,
 ) -> tuple[str, str]:
+    """Build a draft from the invoice facts. Returns the text and its tone.
+
+    With no tone given, it is firm for a High-risk invoice or one more than
+    14 days overdue, friendly otherwise. With no stage given, it is the stage
+    at `now`. The tone switch passes both, so only the tone changes (issue #152).
+    """
     now = now or utcnow()
-    overdue_days = max(0, (now - invoice.due_at).days)
-    tone = "firm" if overdue_days > 14 or invoice.risk_level == RiskLevel.HIGH else "friendly"
+    if tone is None:
+        overdue_days = max(0, (now - invoice.due_at).days)
+        tone = "firm" if overdue_days > 14 or invoice.risk_level == RiskLevel.HIGH else "friendly"
+    stage = stage or reminder_stage(invoice, now)
     signature = settings.paypal_invoicer_email or "Duebell"
 
-    if reminder_stage(invoice, now) is ReminderStage.OVERDUE:
+    if stage is ReminderStage.OVERDUE:
         opening = (
             f"Invoice {invoice.invoice_number} for {money(invoice.amount_cents, invoice.currency)} "
             f"{invoice.currency} was due on {invoice.due_at:%d %b %Y} and is still open."
@@ -407,6 +422,55 @@ def edit_reminder(session: Session, reminder: Reminder, text: str) -> Reminder:
     return reminder
 
 
+class EditedDraft(ValueError):
+    """A tone switch would replace text the user wrote by hand (issue #152)."""
+
+
+def switch_tone(
+    session: Session,
+    reminder: Reminder,
+    tone: str,
+    settings: Settings,
+    *,
+    replace_edit: bool = False,
+) -> Reminder:
+    """Rebuild a pending draft in the tone the user picked (issue #152).
+
+    The text comes from the invoice facts, in the reminder's own stage, so a
+    switch changes only the tone. The pick is saved in chosen_tone. A
+    hand-edited draft raises EditedDraft unless replace_edit is set, so the
+    user's words are never replaced without asking. A draft an approval
+    claimed meanwhile is left alone. The caller looks the
+    reminder up within the user's scope (ADR 0008).
+    """
+    if reminder.status != ReminderStatus.PENDING:
+        raise ValueError("Only a pending draft can switch tone.")
+    if tone not in TONES:
+        raise ValueError("Pick a friendly or firm tone.")
+    if reminder.tone == "custom" and not replace_edit:
+        raise EditedDraft("This draft has your own edits. Switching the tone replaces them.")
+    invoice = session.get(Invoice, reminder.invoice_id)
+    client = session.get(Client, invoice.client_id) if invoice else None
+    if invoice is None or client is None:
+        raise ValueError("This reminder has no invoice.")
+    # A row from before issue #42 has no stage. Use the one the scan would
+    # count it in, from when it was drafted.
+    stage = ReminderStage(reminder.stage or reminder_stage(invoice, reminder.created_at))
+    draft_text, tone = reminder_text(invoice, client, settings, tone=tone, stage=stage)
+    # One conditional update, so a switch never changes a draft an approval
+    # has claimed since it was read (issue #48).
+    result = session.exec(
+        update(Reminder)
+        .where(Reminder.id == reminder.id, Reminder.status == ReminderStatus.PENDING)
+        .values(draft_text=draft_text, tone=tone, chosen_tone=tone)
+    )
+    session.commit()
+    session.refresh(reminder)
+    if result.rowcount != 1:
+        raise ValueError("Only a pending draft can switch tone.")
+    return reminder
+
+
 def reject_reminder(session: Session, reminder: Reminder) -> Reminder:
     if reminder.status != ReminderStatus.PENDING:
         raise ValueError("Only a pending draft can be rejected.")
@@ -436,6 +500,7 @@ def reminder_rows(session: Session, scope: Scope) -> list[dict]:
                 "due_display": invoice.due_at.strftime("%d %b %Y") if invoice else "",
                 "draft_text": reminder.draft_text,
                 "tone": reminder.tone,
+                "chosen_tone": reminder.chosen_tone,
                 "status": reminder.status,
                 "created_display": reminder.created_at.strftime("%d %b %H:%M"),
                 "sent_at": reminder.sent_at.isoformat(timespec="minutes") if reminder.sent_at else None,
