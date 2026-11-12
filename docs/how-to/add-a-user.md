@@ -41,4 +41,13 @@ You can run it while the app runs. The script empties each table in the same dat
 - A browser that was signed in stays signed in until its session ends, after 12 hours.
 - If five sign-ins failed in the last 15 minutes, the email stays locked out. Wait, or restart the app.
 
-There is no password change for other users yet.
+## Reset a forgotten password
+
+A user who forgot their password clicks **Forgot password?** on the sign-in page and enters their email. Duebell emails a link that works once, within 30 minutes. The link opens a page to choose a new password of 10 to 1,024 characters. The new password signs the user out of every other browser.
+
+The page shows the same message whether or not the email has an account. An email can ask for five links within 15 minutes; further requests send nothing.
+
+Reset links need email:
+
+- In `smtp` mode, set `PUBLIC_URL` to the address users open Duebell at, so the link points there. Without it, Duebell sends no link and logs a warning. See [send reminders by email](send-reminders-by-email.md) for the SMTP settings.
+- In `mock` mode no email goes out. The link appears in the server log, as a line that starts `Mock email: password reset link for`. Copy it from there.

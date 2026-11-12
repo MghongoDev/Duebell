@@ -142,6 +142,21 @@ class User(SQLModel, table=True):
     session_key: Optional[str] = Field(default_factory=new_session_key)
 
 
+class PasswordReset(SQLModel, table=True):
+    """One emailed password reset link (issue #151).
+
+    Only a SHA-256 hash of the link's token is stored, so a copy of the
+    database cannot reset anyone's password. A link works once, until
+    expires_at. Setting a new password deletes every link the user has.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    token_hash: str = Field(index=True, unique=True)
+    created_at: datetime = Field(default_factory=utcnow, sa_type=UTCDateTime)
+    expires_at: datetime = Field(sa_type=UTCDateTime)
+
+
 class Client(SQLModel, table=True):
     # Two users may bill the same client email, so email is unique per user.
     __table_args__ = (Index("ux_client_user_email", "user_id", "email", unique=True),)

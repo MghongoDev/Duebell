@@ -4,11 +4,11 @@ Duebell is a sandbox demo, but it can be hosted for several people. This page ex
 
 ## Sign-in
 
-- A middleware turns away every request without a valid session, except six public paths: sign-in, sign-out, sign-up, `/healthz`, static files and the PayPal webhook. Sign-out is public so an expired session can still sign out; it only clears the cookie. A page or form post without a session redirects to sign-in, and a JSON route answers `401`. It denies by default, so a new route is protected without extra code. A test lists every route and checks this.
+- A middleware turns away every request without a valid session, except a few public paths: sign-in, sign-out, sign-up, the two password reset pages, `/healthz`, static files and the PayPal webhook. Sign-out is public so an expired session can still sign out; it only clears the cookie. A page or form post without a session redirects to sign-in, and a JSON route answers `401`. It denies by default, so a new route is protected without extra code. A test lists every route and checks this.
 - Duebell hashes passwords with scrypt and a random salt. Each hash records its cost, so the cost can rise later.
 - The session is a cookie holding the user ID, the user's session key and an expiry, signed with `SECRET_KEY`. It is HttpOnly, SameSite=Lax, and Secure when `COOKIE_SECURE=true`. It lasts 12 hours.
 - Each user has a random session key, stored with the user. The middleware accepts a cookie only while its key matches the user's current key. User IDs can repeat: a demo reset empties the tables, and SQLite then gives the next user the ID of a deleted one. The new user has a new key, so a cookie issued to the deleted user does not sign anyone in.
-- Giving a user a new session key signs them out everywhere. Duebell has no button for this yet; a password change flow could do it.
+- Giving a user a new session key signs them out everywhere. A password reset does this.
 - A database from an older build has no session keys. On startup Duebell adds the column and gives every user a key. Cookies issued before the upgrade hold no key, so every existing session ends once and each user signs in again.
 - SameSite=Lax also stops other sites from posting forms with the cookie.
 - Sign-in needs no cookie, so it checks the `Origin` header instead. A post whose `Origin` names a host other than the one it was sent to gets `403`, which stops a hostile page from signing a victim into the attacker's account. Duebell allows a post with no `Origin`, since some clients leave it out. The referrer policy is `same-origin`: it sends nothing to other sites, and it lets a browser name its own origin. Under `no-referrer` a browser sends `Origin: null` on every form post, which the check refuses.
@@ -27,6 +27,16 @@ Sign-up is off unless `SIGNUP_ENABLED` is on. While it is off, `/signup` answers
 - Sign-up does not sign the visitor in. Whether the email is new or already has an account, the visitor sees the same sign-in page with the same message, and gets no cookie. A taken email changes nothing about its account, and costs the same password hash as a new one, so the timing is close too.
 - This hides less than it seems. Duebell does not check that a visitor owns the email. So anyone can sign up with an email and a password of their choosing, then try to sign in with it. If that works, the email was free, and they now hold an account under it. If it fails, the email was taken. Each such test costs one sign-up and one counted sign-in attempt. Hiding it fully needs an email that proves ownership before the account exists.
 - The whole app accepts 20 sign-up attempts per 15 minutes. Each sign-up names a new email, so a count per email, as sign-in uses, would never fill. One count for everyone caps how fast anyone can add accounts or test emails. The cost is that someone who sends many attempts also turns honest visitors away, with `429`, until the oldest attempt is 15 minutes old. Sign-up refuses bad input before it counts, so typos do not use up the count. Like the lockout, the count lives in process memory.
+
+## Password reset
+
+- The sign-in page links to "Forgot password". It asks for an email and answers with the same message whatever the email: known, unknown, or not an email at all. The answer goes out before Duebell looks the email up; the lookup and the send run after it. So neither the page nor the time it takes shows whether an account exists.
+- Reset requests count per email, five within 15 minutes, in a table of their own like the sign-in lockout. A request over the limit gets the same message and sends nothing. The two tables are separate, so reset requests cannot lock anyone out of sign-in.
+- The email holds a link with a random 32-byte token. The database keeps only the token's SHA-256 hash, so a copy of the database cannot reset a password. The link works once and expires after 30 minutes.
+- Setting a new password gives the user a new session key, so every older session ends, and deletes every reset link the user has. It also clears the sign-in lockout for that email, since the user has shown they read its mail.
+- The link points at `PUBLIC_URL`. In `smtp` mode without `PUBLIC_URL`, Duebell sends no link and logs a warning. It never builds the link from the request's `Host` header there, because the person asking chooses that header and could point the link at their own site.
+- In mock email mode no email leaves the server. The link goes to the server log, never to the page, since showing it would let anyone reset the demo account. Without `PUBLIC_URL`, mock mode builds the link from the address the request came to.
+- Both reset forms pass the same `Origin` check as sign-in.
 
 ## Ownership
 
@@ -64,10 +74,10 @@ img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors
 
 ## Known gaps
 
-- Signing a single user out everywhere means giving them a new session key in the database; there is no route or script for it. Changing `SECRET_KEY` signs everyone out.
+- Signing a single user out everywhere means giving them a new session key in the database; a password reset does it, and there is no other route or script for it. Changing `SECRET_KEY` signs everyone out.
 - The lockout lives in process memory. A restart clears it.
 - Anyone can keep the demo account locked by sending five wrong passwords every 15 minutes. The lockout counts attempts per email, not per client. Counting per client address would mean trusting the `X-Forwarded-For` header that Render's proxy adds, and any client can forge that header, so an attacker could make unlimited guesses by sending a new address each time. Duebell keeps counting per email.
-- There is no password reset and no email check on new users. With sign-up on, anyone can make accounts under emails they do not own, and can learn whether an email is registered, as described above.
+- There is no email check on new users. With sign-up on, anyone can make accounts under emails they do not own, and can learn whether an email is registered, as described above.
 - SQLite and a single process: no running several copies of the app.
 
 ## Before hosting
