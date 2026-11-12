@@ -6,6 +6,8 @@ It helps freelancers and small businesses get paid. You describe a job in plain 
 
 ![Duebell dashboard](docs/dashboard.png)
 
+Watch the [demo video](https://youtu.be/3WWXc2XM2-g) (under 3 minutes).
+
 ## Quick start
 
 You need Python 3.12 or later. Nothing else: the defaults need no PayPal account, model key or email server.
