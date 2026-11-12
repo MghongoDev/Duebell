@@ -9,6 +9,7 @@ Every table that holds a user's data has a `user_id` ([ADR 0008](../adr/0008-sig
 | Table | One row is | Key fields |
 | --- | --- | --- |
 | `user` | A person who signs in. | `email` (unique), `password_hash` (scrypt, with its cost), `session_key` (random; every session cookie carries it, and a cookie whose key no longer matches is refused. Startup gives a key to any user without one). |
+| `passwordreset` | One emailed password reset link. | `user_id`, `token_hash` (SHA-256 of the link's token; the token itself is never stored), `expires_at`. Setting a new password through a link deletes all of that user's rows. |
 | `client` | Someone a user bills. | `name`, `email`. Email is unique per user, so two users may bill the same address. |
 | `invoice` | A request for payment. | `invoice_number`, `paypal_invoice_id`, `amount_cents`, `currency`, `terms_days`, `issued_at`, `due_at`, `paid_at`, `status`, `risk_score`, `risk_level`, `risk_reasons`, `limited_data`, `limited_data_reason`, `repeat_unit`, `repeat_cycles`. The last two hold a Repeat ticked on the form while the invoice waits to be sent, and are cleared when the invoice is sent and the schedule starts, whether **Send**, a webhook or **Refresh** moved it, or when it is cancelled or refunded first. |
 | `invoicenumbercounter` | The counter behind invoice numbers. One row. | `last`, the last number handed out. |

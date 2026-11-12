@@ -52,3 +52,11 @@ The decision above names four public paths. Since issue #84 there is a fifth: `P
 ## Revision, 2026-11-11 (2)
 
 The decision above says the session cookie holds the user id and an expiry. It now also holds a random session key, which each user has and the database stores. Sign-in accepts a cookie only while its key matches the user's current key. User ids can repeat: a demo reset empties the tables, and SQLite then gives the next user a deleted user's id. Deleting the database file did the same. So a cookie must name the user, not just the id. On upgrade, every user gets a key, and existing sessions end once (issue #142).
+
+## Revision, 2026-11-12
+
+The alternatives above note there was no password reset. There is one now (issue #151). A user asks for a link by email from the sign-in page, and the link sets a new password. Two more paths are public: `/forgot-password` and `/reset-password`. The new `passwordreset` table holds each link's owner, a SHA-256 hash of its token and its expiry; never the token itself. A link works once, for 30 minutes. Setting a password gives the user a new session key, which ends every older session, and deletes the user's other links.
+
+The request page gives the same answer for every email, and looks the email up only after it has answered, so neither its text nor its timing shows whether an account exists. Requests count per email in a second in-memory lockout, apart from sign-in. Links point at the new `PUBLIC_URL` setting; in `smtp` mode without it, no link is sent, since the `Host` header is the requester's to choose. In mock email mode the link goes to the server log only, so a hosted demo never shows it on screen.
+
+Public sign-up is still rejected for now; email verification of new users does not exist yet.

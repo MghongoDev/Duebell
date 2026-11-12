@@ -28,17 +28,19 @@ from app.mailer import build_mailer
 from app.models import User, init_db, make_engine
 from app.paypal import build_gateway
 from app.reminders import release_interrupted_reminders
-from app.routes import auth, dashboard, invoices, reminders, risk, schedules, webhooks
+from app.routes import auth, dashboard, invoices, password_reset, reminders, risk, schedules, webhooks
 from app.routes.common import BASE_DIR
 from app.schedules import release_interrupted
 
 # /logout is public so it clears the cookie and redirects even when the
 # session has already expired (issue #84). It only ever signs out.
 PUBLIC_PATHS = {"/login", "/logout", "/healthz", "/webhooks/paypal"}
+# Someone who forgot their password has no session (issue #151).
+PUBLIC_PATHS |= {"/forgot-password", "/reset-password"}
 # Routes called by scripts, not by a page or form; without a session they
 # answer 401 with JSON instead of a redirect (issue #84).
 JSON_PATHS = {"/parse"}
-ROUTERS = (auth, dashboard, invoices, risk, schedules, reminders, webhooks)
+ROUTERS = (auth, dashboard, invoices, risk, schedules, reminders, webhooks, password_reset)
 
 
 def _add_routes(app: FastAPI, router: APIRouter) -> None:
@@ -119,6 +121,8 @@ def create_app(
     # Without SECRET_KEY, sessions last until the process restarts.
     app.state.secret_key = settings.secret_key or secrets.token_urlsafe(32)
     app.state.lockout = Lockout()
+    # Reset requests count per email like sign-ins, in a table of their own (issue #151).
+    app.state.reset_lockout = Lockout()
 
     @app.middleware("http")
     async def require_sign_in(request: Request, call_next):

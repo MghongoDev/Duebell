@@ -74,6 +74,8 @@ class Settings:
     smtp_timeout_seconds: float = 20.0
     secret_key: str = ""
     cookie_secure: bool = False
+    # Where users reach the app, for links in email (issue #151).
+    public_url: str = ""
 
 
 def _env(name: str, default: str = "") -> str:
@@ -120,4 +122,5 @@ def get_settings() -> Settings:
         smtp_timeout_seconds=float(_env("SMTP_TIMEOUT_SECONDS", "20")),
         secret_key=_env("SECRET_KEY", "").strip(),
         cookie_secure=_bool("COOKIE_SECURE", False),
+        public_url=_env("PUBLIC_URL", "").strip().rstrip("/"),
     )

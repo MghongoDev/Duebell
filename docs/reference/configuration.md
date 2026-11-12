@@ -12,7 +12,7 @@ On/off settings (`MOCK_WEBHOOKS`, `SMTP_STARTTLS`, `COOKIE_SECURE`) accept `on`,
 | --- | --- | --- | --- |
 | `PAYPAL_MODE` | `mock` | `mock`, `sandbox`, `toolkit` | Picks the [gateway](../../GLOSSARY.md). `mock` keeps invoices in memory. `sandbox` calls the PayPal sandbox REST API. `toolkit` sends, reminds, records payments and reads status through PayPal's Agent Toolkit ([ADR 0006](../adr/0006-agent-toolkit-adapter.md)). |
 | `LLM_MODE` | `mock` | `mock`, `live` | `mock` parses only the demo sentence. `live` calls an Anthropic-compatible model. |
-| `EMAIL_MODE` | `mock` | `mock`, `smtp` | `mock` keeps reminder emails in memory. `smtp` sends them. |
+| `EMAIL_MODE` | `mock` | `mock`, `smtp` | `mock` keeps reminder emails in memory and writes password reset links to the server log. `smtp` sends both. |
 | `MOCK_WEBHOOKS` | `false` | on/off | Mock mode cannot check a webhook's signature, so it refuses every webhook with `401` and stores nothing unless this is on. `.env.example` turns it on for the local demo. Leave it off on a public host; `render.yaml` does. It has no effect in `sandbox` or `toolkit` mode, which always check the signature through PayPal. |
 
 A `*_MODE` value other than those listed falls back to `mock`.
@@ -60,6 +60,7 @@ If live mode lacks a credential or a base URL, parsing falls back to the mock pa
 | `COOKIE_SECURE` | `false` | On/off. Turn it on behind HTTPS so browsers send the cookie only over HTTPS. |
 | `DEMO_PASSWORD` | empty | The password the seed gives `demo@duebell.test`. If empty, the seed uses `duebell-demo-2026`, unless it runs with `--require-password`. |
 | `DUEBELL_PASSWORD` | empty | Read only by `scripts/create_user.py`, instead of prompting. |
+| `PUBLIC_URL` | empty | The address users open Duebell at, such as `https://duebell.example.com`. Password reset links point here. In `smtp` mode Duebell sends no reset link without it. In `mock` mode it falls back to the address the request came to. |
 
 ## Invoices and reminders
 
@@ -93,4 +94,6 @@ These are constants in the code, not settings.
 | Session length | 12 hours |
 | Sign-in attempts before a lockout | 5 within 15 minutes, counted before the password check. A correct password clears the count. |
 | Emails the lockout tracks | 10,000. Entries expire after 15 minutes. A locked email is never dropped; while every entry is locked, a new email is refused. |
+| Password reset requests | 5 per email within 15 minutes, counted apart from sign-in attempts. A request over the limit gets the same answer and sends nothing. |
+| Password reset link | Works once, for 30 minutes. A new password ends every link the user has. |
 | Retries for sandbox PayPal calls and model calls | 3 attempts, exponential backoff. Toolkit calls do not retry. |

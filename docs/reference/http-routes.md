@@ -1,6 +1,6 @@
 # HTTP routes
 
-Every route needs a signed-in user except the five public paths: `/login`, `/logout`, `/healthz`, `/static/...` and `/webhooks/paypal` ([ADR 0008](../adr/0008-sign-in-and-ownership.md)). Without a valid session, as after the 12-hour expiry, a page or form post redirects to `/login` with `303`. Routes under `/api/` and `POST /parse` return `401` with `{"ok": false, "error": "Sign in first."}` instead.
+Every route needs a signed-in user except the public paths: `/login`, `/logout`, `/forgot-password`, `/reset-password`, `/healthz`, `/static/...` and `/webhooks/paypal` ([ADR 0008](../adr/0008-sign-in-and-ownership.md)). Without a valid session, as after the 12-hour expiry, a page or form post redirects to `/login` with `303`. Routes under `/api/` and `POST /parse` return `401` with `{"ok": false, "error": "Sign in first."}` instead.
 
 Each route acts only on the signed-in user's records. Another user's record gets the same `404` as a missing one.
 
@@ -14,6 +14,10 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 | `GET` | `/login` | The sign-in page. |
 | `POST` | `/login` | Fields `email`, `password`. Sets the session cookie and redirects to `/`. A wrong password, a locked email, an email over 254 characters or without `@`, or a password over 1,024 characters returns `401` with the page. An `Origin` header naming another host returns `403`. |
 | `POST` | `/logout` | Clears the cookie and redirects to `/login`, with or without a valid session. |
+| `GET` | `/forgot-password` | Public. The page that asks for an email to reset a password. |
+| `POST` | `/forgot-password` | Public. Field `email`. Always `200` with the same message. If the email has a user and is under the request limit, emails a reset link after answering. An `Origin` header naming another host returns `403`. |
+| `GET` | `/reset-password?token=...` | Public. The page to choose a new password. `400` if the link is unknown, used or expired. |
+| `POST` | `/reset-password` | Public. Fields `token`, `password`. Sets the password, ends the user's sessions and shows a link to sign in. `400` for a bad link, `422` for a password the rules refuse (the link still works), `403` for an `Origin` naming another host. |
 | `GET` | `/` | The dashboard. |
 
 ## Invoices
