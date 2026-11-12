@@ -43,11 +43,12 @@ The **risk comparison** asks whether a trained model would do better than the ru
 
 1. It takes each of the user's invoices whose outcome is known now, by the rule above.
 2. For each, it rebuilds the inputs above as they stood on the day the invoice was issued, from the client's earlier invoices only. A payment that came later never leaks into the row, and an earlier invoice counts only if its outcome was known on that day.
-3. It holds out a quarter of the rows at random, fits logistic regression on the rest, and scores both models on the held-out rows.
+3. It sorts the rows by issue date and holds out the newest quarter, rounded up. Invoices issued at the same moment as the oldest held-out invoice are held out too, so every training row was issued before every held-out row.
+4. It fits logistic regression on the older rows and scores both models on the held-out rows. The result names the issue dates of the first and last held-out invoice.
 
-Below 30 invoices, or with fewer than 5 late or 5 on time, the dashboard says there is not enough history and shows no number. The seeded demo sits below that line on purpose. Each user's refit uses only that user's invoices.
+Testing on the newest invoices shows how the model would do on next month's invoices. A random split would let it learn from invoices issued after the ones it is tested on, which flatters its score.
 
-The held-out rows are a random sample, not the most recent invoices. A split by time would better show how the model would do on next month's invoices.
+Below 30 invoices, or with fewer than 5 late or 5 on time, the dashboard says there is not enough history and shows no number. It says the same when the held-out invoices, or the older ones, are all late or all on time, because neither model can be fitted or scored on one outcome. The seeded demo sits below that line on purpose. Each user's refit uses only that user's invoices.
 
 ### Known gap: cancellations
 
@@ -55,12 +56,12 @@ An invoice does not record when it was cancelled. So the rebuild leaves out ever
 
 ## Current figures
 
-Measured on 10 November 2026, after the known-outcome rule (issue #46). The rule did not change any of them.
+Measured on 10 November 2026, after the known-outcome rule (issue #46). The rule did not change any of them. The `scripts/train_risk.py` row was measured again on 12 November 2026, after the split by issue date (issue #148). The synthetic rows have no trend over time, so its numbers moved only because it now tests on a different 200 rows.
 
 | Run | Result |
 | --- | --- |
 | `scripts/evals.py` | Reminders 10/10, webhook replay pass, overall pass. Parsing cases skipped offline. |
-| `scripts/train_risk.py` | 800 synthetic rows, 200 held out. Rule baseline accuracy 0.705, AUC 0.782. Logistic regression accuracy 0.705, AUC 0.816. |
+| `scripts/train_risk.py` | 800 synthetic rows, the newest 200 held out. Rule baseline accuracy 0.705, AUC 0.732. Logistic regression accuracy 0.665, AUC 0.731. |
 | Refit on the seeded demo | 22 invoices with a known outcome, 18 late and 4 on time. Below the line, so no number. |
 
-`scripts/train_risk.py` runs the comparison on synthetic histories. It builds feature rows directly and does not read invoices, so the known-outcome rule does not touch it. Its result shows the method works, not that the model suits real clients.
+`scripts/train_risk.py` runs the comparison on synthetic histories. It builds feature rows directly and does not read invoices, so the known-outcome rule does not touch it. Each row gets an issue date, one day apart, and the script splits them by date the same way the refit does. Its result shows the method works, not that the model suits real clients.

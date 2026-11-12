@@ -36,7 +36,7 @@ The lock targets Python 3.12, the version Render runs. CI also installs it on Py
 .venv/bin/python scripts/train_risk.py
 ```
 
-It prints held-out accuracy and AUC for the rule baseline and for logistic regression. The data is synthetic, so the numbers show the method, not real performance.
+It holds out the newest quarter of rows by issue date and prints their dates, then accuracy and AUC on them for the rule baseline and for logistic regression. The data is synthetic, so the numbers show the method, not real performance.
 
 ## Tests that need the toolkit
 
