@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Sign up · Duebell{% endblock %}
+{% block content %}
+<section class="panel login-panel">
+  <div class="panel-head">
+    <h2>Sign up</h2>
+    <p>A new account starts empty and sees only its own clients, invoices and reminders.</p>
+  </div>
+  {% if error %}
+  <div class="alert" role="alert">{{ error }}</div>
+  {% endif %}
+  <form class="invoice-form login-form" method="post" action="/signup">
+    <label class="wide">
+      <span>Email</span>
+      <input name="email" type="email" autocomplete="username" value="{{ email }}" required autofocus>
+    </label>
+    <label class="wide">
+      <span>Password, at least 10 characters</span>
+      <input name="password" type="password" autocomplete="new-password" required>
+    </label>
+    <div class="form-actions">
+      <button type="submit">Sign up</button>
+    </div>
+  </form>
+  <p class="muted">Have an account? <a href="/login">Sign in</a>.</p>
+</section>
+{% endblock %}

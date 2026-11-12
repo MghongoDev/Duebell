@@ -9,6 +9,9 @@
   {% if error %}
   <div class="alert" role="alert">{{ error }}</div>
   {% endif %}
+  {% if notice %}
+  <div class="notice" role="status">{{ notice }}</div>
+  {% endif %}
   <form class="invoice-form login-form" method="post" action="/login">
     <label class="wide">
       <span>Email</span>
@@ -22,5 +25,8 @@
       <button type="submit">Sign in</button>
     </div>
   </form>
+  {% if request.app.state.settings.signup_enabled %}
+  <p class="muted">No account? <a href="/signup">Sign up</a>.</p>
+  {% endif %}
 </section>
 {% endblock %}

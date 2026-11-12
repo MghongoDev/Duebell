@@ -7,6 +7,8 @@ matches the user's, so it never signs in a later user who reuses the id
 (issue #142). The cookie is HttpOnly and SameSite=Lax, which also stops
 other sites from posting forms with it. Sign-in itself needs no cookie, so the
 route also refuses a post whose Origin names another site (issue #45).
+Sign-up, when on, applies create_user's limits and answers a taken email
+like a new one (issue #150).
 """
 
 from __future__ import annotations
@@ -17,8 +19,10 @@ import hmac
 import json
 import secrets
 import time
+from collections import deque
 from threading import Lock
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.models import User, new_session_key
@@ -34,6 +38,9 @@ MAX_FAILURES = 5
 LOCKOUT_SECONDS = 15 * 60
 MAX_LOCKOUT_ENTRIES = 10_000
 SWEEP_SECONDS = 60
+# Sign-up attempts the whole process accepts per window (issue #150).
+SIGNUP_MAX_ATTEMPTS = 20
+SIGNUP_WINDOW_SECONDS = 15 * 60
 
 
 class AuthError(ValueError):
@@ -101,6 +108,62 @@ def create_user(session: Session, email: str, password: str) -> User:
 
 # A dummy hash so an unknown email costs the same scrypt work as a wrong password.
 _DUMMY_HASH = hash_password(secrets.token_urlsafe(16))
+
+
+class TooManySignups(AuthError):
+    """The process-wide sign-up limit is reached (issue #150)."""
+
+
+class SignupLimit:
+    """Count sign-up attempts for the whole process, in memory (issue #150).
+
+    Each sign-up names a new email, so a count per email, like the sign-in
+    lockout, would never fill. This one counts every attempt together: at most
+    `max_attempts` within SIGNUP_WINDOW_SECONDS. That caps how fast anyone can
+    add accounts or test emails, at the cost that many attempts in a short
+    time also turn honest visitors away until the window passes.
+    """
+
+    def __init__(self, max_attempts: int = SIGNUP_MAX_ATTEMPTS) -> None:
+        self._times: deque[float] = deque()
+        self._lock = Lock()
+        self._max_attempts = max_attempts
+
+    def attempt(self) -> bool:
+        """Count one attempt. False, and nothing counted, if the limit is reached."""
+        with self._lock:
+            now = time.time()
+            while self._times and now - self._times[0] >= SIGNUP_WINDOW_SECONDS:
+                self._times.popleft()
+            if len(self._times) >= self._max_attempts:
+                return False
+            self._times.append(now)
+            return True
+
+
+def sign_up(session: Session, email: str, password: str, limit: SignupLimit) -> User | None:
+    """Create an account from the sign-up page, or return None if the email is taken (issue #150).
+
+    It refuses the same emails and passwords as create_user, with the same
+    messages, before the limit counts the attempt. A taken email changes
+    nothing and costs the same password hash as a new account, so the caller
+    can answer both alike and not reveal that the email is registered.
+    """
+    email = normalize_email(email)
+    if not valid_email(email):
+        raise AuthError("Enter a valid email address.")
+    validate_password(password)
+    if not limit.attempt():
+        raise TooManySignups("Too many sign-ups just now. Wait 15 minutes and try again.")
+    if session.exec(select(User).where(User.email == email)).first():
+        hash_password(password)
+        return None
+    try:
+        return create_user(session, email, password)
+    except (AuthError, IntegrityError):
+        # Another request took the email since the check above.
+        session.rollback()
+        return None
 
 
 class Lockout:

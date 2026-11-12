@@ -548,3 +548,12 @@ button.small {
 .login-form {
   grid-template-columns: 1fr;
 }
+
+.notice {
+  border: 1px solid #b9d4c4;
+  background: var(--green-soft);
+  color: var(--green);
+  border-radius: 10px;
+  padding: 0.8rem 1rem;
+  margin-bottom: 1rem;
+}

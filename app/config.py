@@ -1,4 +1,4 @@
-"""Runtime settings for Duebell (issues #9, #21, #24, #26, #38, #47, #85; ADRs 0005, 0006, 0008)."""
+"""Runtime settings for Duebell (issues #9, #21, #24, #26, #38, #47, #85, #150; ADRs 0005, 0006, 0008)."""
 
 from __future__ import annotations
 
@@ -74,6 +74,8 @@ class Settings:
     smtp_timeout_seconds: float = 20.0
     secret_key: str = ""
     cookie_secure: bool = False
+    # Off unless the host turns it on, so the hosted demo keeps sign-up off (issue #150).
+    signup_enabled: bool = False
 
 
 def _env(name: str, default: str = "") -> str:
@@ -120,4 +122,5 @@ def get_settings() -> Settings:
         smtp_timeout_seconds=float(_env("SMTP_TIMEOUT_SECONDS", "20")),
         secret_key=_env("SECRET_KEY", "").strip(),
         cookie_secure=_bool("COOKIE_SECURE", False),
+        signup_enabled=_bool("SIGNUP_ENABLED", False),
     )
