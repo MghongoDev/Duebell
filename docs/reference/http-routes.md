@@ -1,6 +1,6 @@
 # HTTP routes
 
-Every route needs a signed-in user except the five public paths: `/login`, `/logout`, `/healthz`, `/static/...` and `/webhooks/paypal` ([ADR 0008](../adr/0008-sign-in-and-ownership.md)). Without a valid session, as after the 12-hour expiry, a page or form post redirects to `/login` with `303`. Routes under `/api/` and `POST /parse` return `401` with `{"ok": false, "error": "Sign in first."}` instead.
+Every route needs a signed-in user except the six public paths: `/login`, `/logout`, `/signup`, `/healthz`, `/static/...` and `/webhooks/paypal` ([ADR 0008](../adr/0008-sign-in-and-ownership.md)). Without a valid session, as after the 12-hour expiry, a page or form post redirects to `/login` with `303`. Routes under `/api/` and `POST /parse` return `401` with `{"ok": false, "error": "Sign in first."}` instead.
 
 Each route acts only on the signed-in user's records. Another user's record gets the same `404` as a missing one.
 
@@ -13,6 +13,8 @@ Request bodies are HTML form fields, not JSON. JSON responses carry `"ok": true`
 | `GET` | `/healthz` | Returns `{"ok": true, "service": "duebell"}`. It does not query the database or PayPal. |
 | `GET` | `/login` | The sign-in page. |
 | `POST` | `/login` | Fields `email`, `password`. Sets the session cookie and redirects to `/`. A wrong password, a locked email, an email over 254 characters or without `@`, or a password over 1,024 characters returns `401` with the page. An `Origin` header naming another host returns `403`. |
+| `GET` | `/signup` | The sign-up page. `404` while `SIGNUP_ENABLED` is off. |
+| `POST` | `/signup` | Fields `email`, `password`. Creates an empty account and returns `200` with the sign-in page; it sets no cookie. An email that already has an account gets the same page and changes nothing. A bad email or password returns `400` with the sign-up page and the same message as `scripts/create_user.py`. Over 20 attempts in 15 minutes returns `429`. An `Origin` header naming another host returns `403`. `404` while `SIGNUP_ENABLED` is off. |
 | `POST` | `/logout` | Clears the cookie and redirects to `/login`, with or without a valid session. |
 | `GET` | `/` | The dashboard. |
 

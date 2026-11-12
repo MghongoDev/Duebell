@@ -52,3 +52,9 @@ The decision above names four public paths. Since issue #84 there is a fifth: `P
 ## Revision, 2026-11-11 (2)
 
 The decision above says the session cookie holds the user id and an expiry. It now also holds a random session key, which each user has and the database stores. Sign-in accepts a cookie only while its key matches the user's current key. User ids can repeat: a demo reset empties the tables, and SQLite then gives the next user a deleted user's id. Deleting the database file did the same. So a cookie must name the user, not just the id. On upgrade, every user gets a key, and existing sessions end once (issue #142).
+
+## Revision, 2026-11-12
+
+The alternatives above reject public sign-up. Duebell now has it, behind `SIGNUP_ENABLED`, which is off by default and in `render.yaml`, so the hosted demo does not change (issue #150). `/signup` is a sixth public path; while the setting is off, it answers `404`. Sign-up uses the same email and password limits as `scripts/create_user.py`, gives each new user a session key, and passes the same `Origin` check as sign-in.
+
+Sign-up does not sign the visitor in. A new email and a taken one get the same sign-in page and no cookie, and a taken email changes nothing. Without email verification this only makes it slower to learn whether an email has an account: a visitor can sign up and then try the password they chose. The whole process accepts 20 sign-up attempts per 15 minutes, in memory like the lockout. The reasons for the original rejection still hold for a public host: there is no email verification or password reset, so turn sign-up on only where those gaps are acceptable.
